@@ -1,0 +1,6 @@
+{
+  "name": "Lớp học Bon Ben - Hệ thống học trực tuyến thông minh AI",
+  "description": "Nền tảng học tập trực tuyến thông minh ứng dụng AI hàng đầu dành cho học sinh, phụ huynh và nhà trường với đấu trường kiến thức, bài giảng tương tác và lộ trình cá nhân hóa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
