@@ -27,13 +27,9 @@ import {
   Save,
   Pencil
 } from 'lucide-react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { GradeLevel, UserAccount } from '../types';
 import { MASCOT_IMAGE, GRADE_EXERCISE_TYPES } from '../data/bonbenData';
 import {
-  initAuth,
-  googleSignIn,
-  logoutGmail,
   sendVerificationOtpViaGmail,
   sendPasswordResetOtpViaGmail
 } from '../services/gmailAuth';
@@ -125,10 +121,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showSendConfirmModal, setShowSendConfirmModal] = useState<boolean>(false);
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Google Workspace / Gmail Auth state
-  const [needsGmailAuth, setNeedsGmailAuth] = useState<boolean>(true);
-  const [isSigningInGmail, setIsSigningInGmail] = useState<boolean>(false);
-
   // Selected exercise types for the grade
   const availableExerciseTypes = GRADE_EXERCISE_TYPES[selectedGrade] || GRADE_EXERCISE_TYPES[4];
   const [selectedExercises, setSelectedExercises] = useState<string[]>(
@@ -148,18 +140,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const refreshRegisteredStudents = () => {
     setRegisteredStudents(getAllRegisteredAccounts());
   };
-
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (_user: FirebaseUser) => {
-        setNeedsGmailAuth(false);
-      },
-      () => {
-        setNeedsGmailAuth(true);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -211,27 +191,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSelectedExercises(newTypes.map((t) => t.id));
   };
 
-  const handleGoogleSignInClick = async () => {
-    setIsSigningInGmail(true);
-    setErrors({});
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setNeedsGmailAuth(false);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Đăng nhập Google thất bại.';
-      setErrors({ gmail: message });
-    } finally {
-      setIsSigningInGmail(false);
-    }
-  };
-
-  const handleDisconnectGmail = async () => {
-    await logoutGmail();
-    setNeedsGmailAuth(true);
-  };
-
   const executeSendEmailOtp = async () => {
     setIsSendingEmail(true);
     setErrors({});
@@ -258,9 +217,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const msg =
         err instanceof Error
           ? err.message
-          : 'Không thể gửi email xác thực. Vui lòng kết nối Google và thử lại.';
+          : 'Không thể gửi email xác thực. Vui lòng thử lại.';
       setErrors({ gmail: msg });
-      setNeedsGmailAuth(true);
     } finally {
       setIsSendingEmail(false);
     }
@@ -301,9 +259,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const msg =
         err instanceof Error
           ? err.message
-          : 'Không thể gửi email mã khôi phục. Vui lòng kết nối Google và thử lại.';
+          : 'Không thể gửi email mã khôi phục. Vui lòng thử lại.';
       setErrors({ gmail: msg });
-      setNeedsGmailAuth(true);
     } finally {
       setIsSendingEmail(false);
     }
@@ -990,76 +947,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
           </div>
 
-          {/* Gmail Sender Connection Bar (for Register & Forgot Password modes) */}
+          {/* Email auto-send info — no Google sign-in needed */}
           {!successMessage && (authMode === 'register' || authMode === 'forgot-password') && (
-            <div className="mb-5 p-3.5 rounded-2xl border border-sky-200 bg-sky-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-xs">
-                <div className="flex items-center gap-1.5 font-extrabold text-sky-950">
-                  <Mail className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Hệ thống xác thực Gmail tự động Lớp học Bon Ben</span>
-                </div>
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  {needsGmailAuth
-                    ? 'Kết nối tài khoản Google để gửi thư chứa mã xác thực 6 số về email đăng ký.'
-                    : 'Đã kết nối dịch vụ gửi mã xác thực Gmail thành công.'}
-                </p>
-              </div>
-
-              {needsGmailAuth ? (
-                <button
-                  type="button"
-                  onClick={handleGoogleSignInClick}
-                  disabled={isSigningInGmail}
-                  className="gsi-material-button inline-flex items-center gap-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-slate-300 shadow-2xs transition-all cursor-pointer shrink-0"
-                >
-                  <div className="gsi-material-button-state" />
-                  <div className="gsi-material-button-content-wrapper flex items-center gap-2">
-                    <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                      <svg
-                        version="1.1"
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 48 48"
-                        className="w-4 h-4 block"
-                      >
-                        <path
-                          fill="#EA4335"
-                          d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                        />
-                        <path
-                          fill="#4285F4"
-                          d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                        />
-                        <path fill="none" d="M0 0h48v48H0z" />
-                      </svg>
-                    </div>
-                    <span className="gsi-material-button-contents">
-                      {isSigningInGmail ? 'Đang kết nối...' : 'Sign in with Google'}
-                    </span>
-                  </div>
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-lg">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Đã kết nối Gmail</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleDisconnectGmail}
-                    className="text-[11px] text-slate-500 hover:text-red-600 font-semibold underline cursor-pointer"
-                  >
-                    Đổi TK
-                  </button>
-                </div>
-              )}
+            <div className="mb-5 p-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <p className="text-xs text-emerald-800 font-semibold">
+                Hệ thống sẽ tự động gửi mã xác thực 6 số về hộp thư Gmail của bạn — không cần liên kết Google.
+              </p>
             </div>
           )}
 
@@ -2477,53 +2371,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              {needsGmailAuth && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                  <p className="font-semibold">
-                    Vui lòng nhấn nút bên dưới để đăng nhập Google cấp quyền gửi thư xác thực:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignInClick}
-                    disabled={isSigningInGmail}
-                    className="gsi-material-button w-full inline-flex items-center justify-center gap-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-300 shadow-2xs transition-all cursor-pointer"
-                  >
-                    <div className="gsi-material-button-state" />
-                    <div className="gsi-material-button-content-wrapper flex items-center gap-2">
-                      <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                        <svg
-                          version="1.1"
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 48 48"
-                          className="w-4 h-4 block"
-                        >
-                          <path
-                            fill="#EA4335"
-                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                          />
-                          <path
-                            fill="#4285F4"
-                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                          />
-                          <path
-                            fill="#FBBC05"
-                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                          />
-                          <path
-                            fill="#34A853"
-                            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                          />
-                          <path fill="none" d="M0 0h48v48H0z" />
-                        </svg>
-                      </div>
-                      <span className="gsi-material-button-contents">
-                        {isSigningInGmail ? 'Đang kết nối Google...' : 'Sign in with Google'}
-                      </span>
-                    </div>
-                  </button>
-                </div>
-              )}
-
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="button"
@@ -2590,53 +2437,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <strong className="text-slate-800">Đổi lại mật khẩu mới (Mã 6 số)</strong>
                 </div>
               </div>
-
-              {needsGmailAuth && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                  <p className="font-semibold">
-                    Vui lòng nhấn nút bên dưới để đăng nhập Google cấp quyền gửi thư khôi phục:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignInClick}
-                    disabled={isSigningInGmail}
-                    className="gsi-material-button w-full inline-flex items-center justify-center gap-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-300 shadow-2xs transition-all cursor-pointer"
-                  >
-                    <div className="gsi-material-button-state" />
-                    <div className="gsi-material-button-content-wrapper flex items-center gap-2">
-                      <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                        <svg
-                          version="1.1"
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 48 48"
-                          className="w-4 h-4 block"
-                        >
-                          <path
-                            fill="#EA4335"
-                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                          />
-                          <path
-                            fill="#4285F4"
-                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                          />
-                          <path
-                            fill="#FBBC05"
-                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                          />
-                          <path
-                            fill="#34A853"
-                            d="M24 48c.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                          />
-                          <path fill="none" d="M0 0h48v48H0z" />
-                        </svg>
-                      </div>
-                      <span className="gsi-material-button-contents">
-                        {isSigningInGmail ? 'Đang kết nối Google...' : 'Sign in with Google'}
-                      </span>
-                    </div>
-                  </button>
-                </div>
-              )}
 
               <div className="flex items-center gap-3 pt-2">
                 <button
