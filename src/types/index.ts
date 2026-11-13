@@ -108,7 +108,10 @@ export interface UserAccount {
   grade: GradeLevel;
   className?: string;
   school?: string;
-  role: 'student' | 'teacher' | 'parent' | 'admin';
+  schoolLevel?: 'elementary' | 'lower-secondary' | 'upper-secondary';
+  provinceOrCity?: string;
+  district?: string;
+  role: 'student' | 'teacher' | 'parent' | 'school' | 'admin';
   /**
    * Đối với Học sinh:
    * - canPracticeAll = false (mặc định khi mới đăng ký): Chỉ được làm thử 3 bài ở dòng đầu, không được làm các bài ôn 4..20 và không được làm bài thi/kiểm tra.
@@ -138,6 +141,14 @@ export interface UserAccount {
   avatar?: string;
   selectedExerciseTypes?: string[];
   createdAt: string;
+}
+
+export interface SchoolDirectoryEntry {
+  id: string;
+  schoolName: string;
+  schoolLevel: 'elementary' | 'lower-secondary' | 'upper-secondary';
+  provinceOrCity: string;
+  district: string;
 }
 
 export interface SiteConfig {

@@ -13,8 +13,6 @@ import {
   ArrowLeft,
   LogOut,
   ShieldCheck,
-  Check,
-  Layers,
   RefreshCw,
   Send,
   Loader2,
@@ -28,7 +26,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
-import { GradeLevel, UserAccount } from '../types';
+import { GradeLevel, SchoolDirectoryEntry, UserAccount } from '../types';
 import { MASCOT_IMAGE, GRADE_EXERCISE_TYPES } from '../data/bonbenData';
 import {
   initAuth,
@@ -42,10 +40,14 @@ import {
   saveAllRegisteredAccounts,
   isSameClassAndSchool,
   adminUpdateTeacherApproval,
-  adminUpdateStudentPracticePermission
+  adminUpdateStudentPracticePermission,
+  getSchoolDirectory
 } from '../services/schoolManager';
 
 const ADMIN_GMAIL = 'bonbenemail@gmail.com';
+
+const getSchoolLevelForGrade = (grade: number): SchoolDirectoryEntry['schoolLevel'] =>
+  grade <= 5 ? 'elementary' : grade <= 9 ? 'lower-secondary' : 'upper-secondary';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -93,6 +95,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     currentUser?.className || `${currentUser?.grade || currentGrade}A1`
   );
   const [schoolInput, setSchoolInput] = useState(currentUser?.school || '');
+  const [schoolLevelInput, setSchoolLevelInput] = useState<SchoolDirectoryEntry['schoolLevel']>(
+    currentUser?.schoolLevel || getSchoolLevelForGrade(currentUser?.grade || currentGrade)
+  );
+  const [provinceInput, setProvinceInput] = useState(currentUser?.provinceOrCity || '');
+  const [districtInput, setDistrictInput] = useState(currentUser?.district || '');
+  const [schoolDirectory, setSchoolDirectory] = useState<SchoolDirectoryEntry[]>(() => getSchoolDirectory());
 
   // Profile edit state (for changing class & school after registration)
   const [editGrade, setEditGrade] = useState<GradeLevel>(currentUser?.grade || currentGrade);
@@ -129,12 +137,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [needsGmailAuth, setNeedsGmailAuth] = useState<boolean>(false);
   const [isSigningInGmail, setIsSigningInGmail] = useState<boolean>(false);
 
-  // Selected exercise types for the grade
-  const availableExerciseTypes = GRADE_EXERCISE_TYPES[selectedGrade] || GRADE_EXERCISE_TYPES[4];
-  const [selectedExercises, setSelectedExercises] = useState<string[]>(
-    availableExerciseTypes.map((e) => e.id)
-  );
-
   // UI state
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
@@ -152,6 +154,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       refreshRegisteredStudents();
+      setSchoolDirectory(getSchoolDirectory());
       if (currentUser) {
         setEditGrade(currentUser.grade);
         setEditClassName(currentUser.className || `${currentUser.grade}A1`);
@@ -186,17 +189,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     return val.length > 6;
   };
 
-  const toggleExerciseSelection = (id: string) => {
-    setSelectedExercises((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
   const handleGradeChange = (newGrade: GradeLevel) => {
     setSelectedGrade(newGrade);
     setClassNameInput(`${newGrade}A1`);
-    const newTypes = GRADE_EXERCISE_TYPES[newGrade] || [];
-    setSelectedExercises(newTypes.map((t) => t.id));
+    setSchoolLevelInput(getSchoolLevelForGrade(newGrade));
+    setProvinceInput('');
+    setDistrictInput('');
+    setSchoolInput('');
   };
 
   const handleGoogleSignInClick = async () => {
@@ -434,6 +433,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     const cleanClass = (classNameInput.trim() || `${selectedGrade}A1`).toUpperCase();
     const cleanSchool = schoolInput.trim();
+    const selectedSchool = schoolDirectory.find(
+      (entry) =>
+        entry.schoolName === cleanSchool &&
+        entry.schoolLevel === schoolLevelInput &&
+        entry.provinceOrCity === provinceInput &&
+        entry.district === districtInput
+    );
+    if (!selectedSchool) {
+      setErrors({
+        otp: 'Trường đã chọn không còn trong danh mục. Vui lòng quay lại chọn trường được Admin cấp.',
+      });
+      setRegisterStep('form');
+      return;
+    }
     const isThisAdmin = cleanEmail === ADMIN_GMAIL;
     const finalRole: 'admin' | 'teacher' | 'student' = isThisAdmin
       ? 'admin'
@@ -461,6 +474,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       grade: selectedGrade,
       className: cleanClass,
       school: cleanSchool,
+      schoolLevel: selectedSchool.schoolLevel,
+      provinceOrCity: selectedSchool.provinceOrCity,
+      district: selectedSchool.district,
       role: finalRole,
       // Học sinh mới khi đăng ký mặc định ở trạng thái KHÔNG CHO PHÉP (chờ Admin duyệt, chỉ làm thử 3 bài đầu)
       canPracticeAll: finalRole === 'admin' || finalRole === 'teacher' ? true : false,
@@ -479,7 +495,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         : finalRole === 'teacher'
           ? `GV-${cleanClass}-${Math.floor(100 + Math.random() * 900)}`
           : `HS-${cleanClass}-${Math.floor(100 + Math.random() * 900)}`,
-      selectedExerciseTypes: selectedExercises,
+      selectedExerciseTypes: (GRADE_EXERCISE_TYPES[selectedGrade] || GRADE_EXERCISE_TYPES[4]).map(
+        (exerciseType) => exerciseType.id
+      ),
       createdAt: new Date().toISOString(),
     };
 
@@ -550,8 +568,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (!classNameInput.trim()) {
         newErrors.className = 'Vui lòng nhập tên lớp học (Ví dụ: 4A1, 7B, 10A2).';
       }
-      if (!schoolInput.trim()) {
-        newErrors.school = 'Vui lòng nhập tên trường học của bạn.';
+      if (!schoolInput.trim() || !provinceInput.trim() || !districtInput.trim()) {
+        newErrors.school = 'Vui lòng chọn trường, tỉnh/thành và quận/huyện trong danh mục.';
       }
     }
 
@@ -1996,19 +2014,79 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             : 'Có thể tự đổi Lớp & Trường sau khi đăng ký'}
                         </span>
                       </div>
-                      <div className="relative">
-                        <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
+                      <p className="text-[11px] text-slate-600 mb-2">
+                        Cấp học được xác định theo khối lớp {selectedGrade}: {schoolLevelInput === 'elementary'
+                          ? 'Tiểu học'
+                          : schoolLevelInput === 'lower-secondary' ? 'THCS' : 'THPT'}.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <select
                           required
-                          placeholder="Nhập tên trường (VD: Trường Tiểu học / THCS Chu Văn An)"
-                          value={schoolInput}
-                          onChange={(e) => setSchoolInput(e.target.value)}
-                          className={`w-full pl-9 pr-3.5 py-2.5 rounded-xl border text-xs font-medium text-slate-800 focus:ring-2 focus:ring-sky-500 ${
+                          value={provinceInput}
+                          onChange={(e) => {
+                            setProvinceInput(e.target.value);
+                            setDistrictInput('');
+                            setSchoolInput('');
+                          }}
+                          className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white ${
                             errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
                           }`}
-                        />
+                        >
+                          <option value="">Chọn tỉnh/thành</option>
+                          {[...new Set(schoolDirectory
+                            .filter((entry) => entry.schoolLevel === schoolLevelInput)
+                            .map((entry) => entry.provinceOrCity))].sort().map((province) => (
+                            <option key={province} value={province}>{province}</option>
+                          ))}
+                        </select>
+                        <select
+                          required
+                          value={districtInput}
+                          disabled={!provinceInput}
+                          onChange={(e) => {
+                            setDistrictInput(e.target.value);
+                            setSchoolInput('');
+                          }}
+                          className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
+                            errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
+                          }`}
+                        >
+                          <option value="">Chọn quận/huyện</option>
+                          {[...new Set(schoolDirectory
+                            .filter((entry) =>
+                              entry.schoolLevel === schoolLevelInput &&
+                              entry.provinceOrCity === provinceInput
+                            )
+                            .map((entry) => entry.district))].sort().map((district) => (
+                            <option key={district} value={district}>{district}</option>
+                          ))}
+                        </select>
+                        <select
+                          required
+                          value={schoolInput}
+                          disabled={!districtInput}
+                          onChange={(e) => setSchoolInput(e.target.value)}
+                          className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
+                            errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
+                          }`}
+                        >
+                          <option value="">Chọn trường</option>
+                          {schoolDirectory
+                            .filter((entry) =>
+                              entry.schoolLevel === schoolLevelInput &&
+                              entry.provinceOrCity === provinceInput &&
+                              entry.district === districtInput
+                            )
+                            .map((entry) => (
+                              <option key={entry.id} value={entry.schoolName}>{entry.schoolName}</option>
+                            ))}
+                        </select>
                       </div>
+                      {schoolDirectory.length === 0 && (
+                        <p className="text-[11px] text-amber-700 mt-2">
+                          Chưa có trường trong danh mục. Vui lòng liên hệ Admin để thêm trường trước khi đăng ký.
+                        </p>
+                      )}
                       {errors.school && (
                         <p className="text-[11px] text-red-500 font-semibold mt-1 flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" />
@@ -2017,51 +2095,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       )}
                     </div>
 
-                    {/* 4. DẠNG BÀI TẬP CỦA LỚP ĐƯỢC CHỌN KHI ĐĂNG KÝ */}
-                    <div className="bg-sky-50/70 p-4 rounded-2xl border border-sky-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-extrabold text-sky-950">
-                          <Layers className="w-4 h-4 text-sky-600" />
-                          <span>Các dạng bài tập trọng tâm Lớp {selectedGrade}:</span>
-                        </div>
-                        <span className="text-[10px] text-sky-700 font-bold bg-white px-2 py-0.5 rounded-md border border-sky-200">
-                          Đã chọn {selectedExercises.length}/{availableExerciseTypes.length} dạng
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        {availableExerciseTypes.map((item) => {
-                          const isChecked = selectedExercises.includes(item.id);
-                          return (
-                            <div
-                              key={item.id}
-                              onClick={() => toggleExerciseSelection(item.id)}
-                              className={`p-2.5 rounded-xl border text-xs flex items-center justify-between cursor-pointer transition-all ${
-                                isChecked
-                                  ? 'bg-white border-sky-500 shadow-xs ring-1 ring-sky-500/20'
-                                  : 'bg-white/70 border-slate-200 opacity-60'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5">
-                                <div
-                                  className={`w-4 h-4 rounded-md flex items-center justify-center border ${
-                                    isChecked
-                                      ? 'bg-sky-600 border-sky-600 text-white'
-                                      : 'border-slate-300'
-                                  }`}
-                                >
-                                  {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <span className="font-bold text-slate-800">{item.name}</span>
-                              </div>
-                              <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md">
-                                20 câu
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
                   </>
                 )}
 

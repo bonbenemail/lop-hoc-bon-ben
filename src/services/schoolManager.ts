@@ -1,12 +1,39 @@
-import { GradeLevel, Lesson, SiteConfig, UserAccount } from '../types';
+import { GradeLevel, Lesson, SchoolDirectoryEntry, SiteConfig, UserAccount } from '../types';
 
 const ACCOUNTS_KEY = 'bonben_registered_accounts';
 const CURRENT_USER_KEY = 'bonben_user_account';
 const TEACHER_ASSIGNMENTS_KEY = 'bonben_teacher_assignments';
 const SITE_CONFIG_KEY = 'bonben_site_config';
 const LESSON_OVERRIDES_KEY = 'bonben_lesson_overrides';
+const SCHOOL_DIRECTORY_KEY = 'bonben_school_directory';
 
 export const ADMIN_GMAIL_INTERNAL = 'bonbenemail@gmail.com';
+
+export const getSchoolDirectory = (): SchoolDirectoryEntry[] => {
+  try {
+    const raw = localStorage.getItem(SCHOOL_DIRECTORY_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is SchoolDirectoryEntry =>
+        entry &&
+        typeof entry.id === 'string' &&
+        typeof entry.schoolName === 'string' &&
+        typeof entry.schoolLevel === 'string' &&
+        ['elementary', 'lower-secondary', 'upper-secondary'].includes(entry.schoolLevel) &&
+        typeof entry.provinceOrCity === 'string' &&
+        typeof entry.district === 'string'
+    );
+  } catch (error) {
+    console.error('Không thể đọc danh mục trường học:', error);
+    return [];
+  }
+};
+
+export const saveSchoolDirectory = (entries: SchoolDirectoryEntry[]): void => {
+  localStorage.setItem(SCHOOL_DIRECTORY_KEY, JSON.stringify(entries));
+};
 
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
   topBannerText: 'Ngân hàng 20 bài luyện chuyên sâu mỗi môn Văn · Toán · Anh',
@@ -74,7 +101,10 @@ export const getAllRegisteredAccounts = (): UserAccount[] => {
           // Chuẩn hóa các trường mặc định cho tài khoản cũ nếu chưa có
           const normalizedAcc: UserAccount = {
             ...acc,
-            role: acc.role === 'teacher' ? 'teacher' : 'student',
+            role:
+              acc.role === 'teacher' || acc.role === 'school' || acc.role === 'parent'
+                ? acc.role
+                : 'student',
             canPracticeAll: acc.role === 'teacher' ? true : acc.canPracticeAll === true,
             practiceApprovalStatus:
               acc.role === 'teacher'

@@ -9,6 +9,7 @@
     "gcp-build": "npm run build",
     "start": "node server.js",
     "preview": "vite preview",
+    "test:english-answers": "tsx scripts/test-english-answer-positions.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

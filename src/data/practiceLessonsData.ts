@@ -1110,6 +1110,23 @@ const buildGradeVan20Questions = (
   return questions;
 };
 
+const shuffleEnglishOptions = (options: string[], seed: string): string[] => {
+  const shuffled = [...options];
+  let state = 2166136261;
+
+  for (const character of seed) {
+    state = Math.imul(state ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    const swapIndex = state % (index + 1);
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+
+  return shuffled;
+};
+
 const buildGradeAnh20Questions = (
   grade: GradeLevel,
   lessonIdx: number,
@@ -1192,11 +1209,12 @@ const buildGradeAnh20Questions = (
   for (let i = 0; i < 20; i++) {
     const t = templates[i % templates.length];
     const round = Math.floor(i / templates.length);
+    const options = shuffleEnglishOptions(t.opts, `${grade}:${lessonIdx}:${i}`);
     questions.push({
       id: `anh-g${grade}-b${lessonIdx}-q${i + 1}`,
       question: round === 0 ? t.q : `(Question ${i + 1}/20) ${t.q}`,
-      options: t.opts,
-      correctIndex: t.ans,
+      options,
+      correctIndex: options.indexOf(t.opts[t.ans]),
       explanation: t.exp,
       points: 10,
       difficulty: i < 8 ? 'easy' : i < 15 ? 'medium' : 'hard',
