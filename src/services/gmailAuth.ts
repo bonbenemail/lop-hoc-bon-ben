@@ -83,21 +83,37 @@ const sendMailViaBackend = async ({
 }) => {
   let response: Response;
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 20000);
+  let timeoutId = 0;
   try {
-    response = await fetch('/api/send-mail', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toEmail, cc, replyTo, subject, html, text }),
-      signal: controller.signal,
-    });
+    response = await Promise.race([
+      fetch('/api/send-mail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toEmail, cc, replyTo, subject, html, text }),
+        signal: controller.signal,
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = window.setTimeout(() => {
+          controller.abort();
+          reject(new Error('EMAIL_REQUEST_TIMEOUT'));
+        }, 15000);
+      }),
+    ]);
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Máy chủ gửi email phản hồi quá lâu. Vui lòng thử lại sau.');
+    if (error instanceof Error && error.message === 'EMAIL_REQUEST_TIMEOUT') {
+      throw new Error(
+        'Máy chủ gửi email không phản hồi trong 15 giây. Website có thể chưa triển khai backend gửi email.'
+      );
     }
-    throw new Error(
-      'Không kết nối được máy chủ gửi email trên web. Vui lòng triển khai lại ứng dụng cùng backend gửi email.'
-    );
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Yêu cầu gửi email đã bị hủy. Vui lòng thử lại.');
+    }
+    if (error instanceof TypeError) {
+      throw new Error(
+        'Không kết nối được máy chủ gửi email trên web. Website cần được triển khai cùng backend gửi email.'
+      );
+    }
+    throw error;
   } finally {
     window.clearTimeout(timeoutId);
   }
