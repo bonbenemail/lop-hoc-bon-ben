@@ -1,11 +1,15 @@
 import express from 'express';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
+const buildDirectory = path.join(projectDirectory, 'dist');
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -56,20 +60,36 @@ app.post('/api/send-mail', async (req, res) => {
   try {
     const { toEmail, subject, html, text, replyTo, cc } = req.body || {};
 
-    if (!toEmail || !subject || (!html && !text)) {
+    if (
+      typeof toEmail !== 'string' ||
+      typeof subject !== 'string' ||
+      (!html && !text) ||
+      (html !== undefined && typeof html !== 'string') ||
+      (text !== undefined && typeof text !== 'string') ||
+      (cc !== undefined && typeof cc !== 'string') ||
+      (replyTo !== undefined && typeof replyTo !== 'string')
+    ) {
       return res.status(400).json({
         ok: false,
-        message: 'Thiếu trường bắt buộc: toEmail, subject, html/text.',
+        message: 'Thông tin email không hợp lệ hoặc thiếu trường bắt buộc.',
       });
     }
 
+    const recipient = toEmail.trim();
+    const mailFrom = process.env.MAIL_FROM?.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      return res.status(400).json({ ok: false, message: 'Địa chỉ email nhận không hợp lệ.' });
+    }
+    if (!mailFrom || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailFrom)) {
+      throw new Error('MAIL_FROM chưa được cấu hình bằng địa chỉ gửi đã xác minh.');
+    }
+
     const transporter = getTransporter();
-    const mailFrom = process.env.MAIL_FROM || process.env.SMTP_USER;
     const mailFromName = process.env.MAIL_FROM_NAME || 'Lớp học Bon Ben';
 
     const info = await transporter.sendMail({
       from: `${mailFromName} <${mailFrom}>`,
-      to: toEmail,
+      to: recipient,
       cc: cc || undefined,
       replyTo: replyTo || mailFrom,
       subject,
@@ -77,10 +97,21 @@ app.post('/api/send-mail', async (req, res) => {
       html: html || text || '',
     });
 
+    const acceptedRecipient = info.accepted.some((address) =>
+      (typeof address === 'string' ? address : address.address).toLowerCase() ===
+      recipient.toLowerCase()
+    );
+    if (!acceptedRecipient) {
+      return res.status(502).json({
+        ok: false,
+        message: 'Máy chủ email không chấp nhận địa chỉ người nhận.',
+      });
+    }
+
     return res.json({
       ok: true,
       messageId: info.messageId,
-      accepted: info.accepted || [toEmail],
+      accepted: info.accepted,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Gửi email thất bại.';
@@ -90,6 +121,14 @@ app.post('/api/send-mail', async (req, res) => {
       message,
     });
   }
+});
+
+app.use(express.static(buildDirectory, { index: false }));
+
+app.get(/^(?!\/api\/).*/, (req, res, next) => {
+  res.sendFile(path.join(buildDirectory, 'index.html'), (error) => {
+    if (error) next(error);
+  });
 });
 
 app.listen(port, '0.0.0.0', () => {

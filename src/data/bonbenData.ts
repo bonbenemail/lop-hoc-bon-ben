@@ -1,8 +1,11 @@
 import { Subject, Lesson, GiftItem, LeaderboardUser, SkillDiagnosis, ArenaQuestion, QuizQuestion, ExerciseType, GradeLevel, ExamTest, DuelOpponent, StudentBadge, ArenaScheduleRound } from '../types';
+import mascotImage from '../assets/images/mascot_bonben_1793872988718.jpg';
+import heroImage from '../assets/images/hero_bonben_classroom_1793872988761.jpg';
+import giftsHeroImage from '../assets/images/gifts_bonben_rewards_1793872989067.jpg';
 
-export const MASCOT_IMAGE = '/src/assets/images/mascot_bonben_1793872988718.jpg';
-export const HERO_IMAGE = '/src/assets/images/hero_bonben_classroom_1793872988761.jpg';
-export const GIFTS_HERO_IMAGE = '/src/assets/images/gifts_bonben_rewards_1793872989067.jpg';
+export const MASCOT_IMAGE = mascotImage;
+export const HERO_IMAGE = heroImage;
+export const GIFTS_HERO_IMAGE = giftsHeroImage;
 
 export const SUBJECTS: Subject[] = [
   {
