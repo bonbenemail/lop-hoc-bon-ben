@@ -2457,6 +2457,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
+              {errors.gmail && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{errors.gmail}</span>
+                </div>
+              )}
+
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="button"

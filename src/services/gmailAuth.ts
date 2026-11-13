@@ -81,21 +81,40 @@ const sendMailViaBackend = async ({
   html?: string;
   text?: string;
 }) => {
-  const response = await fetch('/api/send-mail', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ toEmail, cc, replyTo, subject, html, text }),
-  });
+  let response: Response;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 20000);
+  try {
+    response = await fetch('/api/send-mail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toEmail, cc, replyTo, subject, html, text }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Máy chủ gửi email phản hồi quá lâu. Vui lòng thử lại sau.');
+    }
+    throw new Error(
+      'Không kết nối được máy chủ gửi email trên web. Vui lòng triển khai lại ứng dụng cùng backend gửi email.'
+    );
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 
   let data: { ok?: boolean; message?: string };
   try {
     data = await response.json();
   } catch {
-    throw new Error('Phản hồi từ máy chủ gửi email không hợp lệ.');
+    throw new Error(
+      `Máy chủ email trả về phản hồi không hợp lệ (HTTP ${response.status}). Hãy kiểm tra cấu hình triển khai backend.`
+    );
   }
 
   if (!response.ok || data.ok !== true) {
-    throw new Error(data.message || 'Không thể gửi email từ backend.');
+    throw new Error(
+      data.message || `Máy chủ không gửi được email (HTTP ${response.status}).`
+    );
   }
 
   return data;

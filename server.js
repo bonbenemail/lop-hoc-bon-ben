@@ -34,6 +34,9 @@ const getTransporter = () => {
     host,
     port: portNo,
     secure: secureSetting ? secureSetting === 'true' : portNo === 465,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
     auth: { user, pass },
   });
 };
