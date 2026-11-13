@@ -1,4 +1,5 @@
 import { GradeLevel, Lesson, SchoolDirectoryEntry, SiteConfig, UserAccount } from '../types';
+import { shuffleQuestionOptions } from '../utils/answerOptionShuffle';
 
 const ACCOUNTS_KEY = 'bonben_registered_accounts';
 const CURRENT_USER_KEY = 'bonben_user_account';
@@ -6,6 +7,8 @@ const TEACHER_ASSIGNMENTS_KEY = 'bonben_teacher_assignments';
 const SITE_CONFIG_KEY = 'bonben_site_config';
 const LESSON_OVERRIDES_KEY = 'bonben_lesson_overrides';
 const SCHOOL_DIRECTORY_KEY = 'bonben_school_directory';
+const TEACHER_ASSIGNMENTS_SHUFFLE_VERSION_KEY = 'bonben_teacher_assignments_shuffle_version';
+const TEACHER_ASSIGNMENTS_SHUFFLE_VERSION = '1';
 
 export const ADMIN_GMAIL_INTERNAL = 'bonbenemail@gmail.com';
 
@@ -327,9 +330,41 @@ export const teacherUpdateStudentClassStatus = (
 export const getTeacherCustomAssignments = (): Lesson[] => {
   try {
     const raw = localStorage.getItem(TEACHER_ASSIGNMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!raw) {
+      localStorage.setItem(TEACHER_ASSIGNMENTS_SHUFFLE_VERSION_KEY, TEACHER_ASSIGNMENTS_SHUFFLE_VERSION);
+      return [];
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const assignments = parsed as Lesson[];
+    if (localStorage.getItem(TEACHER_ASSIGNMENTS_SHUFFLE_VERSION_KEY) !== TEACHER_ASSIGNMENTS_SHUFFLE_VERSION) {
+      const migrated = assignments.map((lesson) => ({
+        ...lesson,
+        sampleQuestions: lesson.sampleQuestions.map((question) => {
+          const correctAnswer = question.options[question.correctIndex];
+          const shuffled = shuffleQuestionOptions(
+            question.options,
+            question.correctIndex,
+            `teacher-assignment:${lesson.id}:${question.id}`
+          );
+          return {
+            ...question,
+            options: shuffled.options,
+            correctIndex: shuffled.correctIndex,
+            explanation: /^Đáp án đúng là [A-D]:/.test(question.explanation)
+              ? `Đáp án đúng là ${String.fromCharCode(65 + shuffled.correctIndex)}: ${correctAnswer}`
+              : question.explanation,
+          };
+        }),
+      }));
+      localStorage.setItem(TEACHER_ASSIGNMENTS_KEY, JSON.stringify(migrated));
+      localStorage.setItem(TEACHER_ASSIGNMENTS_SHUFFLE_VERSION_KEY, TEACHER_ASSIGNMENTS_SHUFFLE_VERSION);
+      return migrated;
+    }
+
+    return assignments;
   } catch (e) {
     console.error(e);
     return [];
@@ -346,6 +381,7 @@ export const saveTeacherCustomAssignment = (lesson: Lesson): Lesson[] => {
     next = [lesson, ...list];
   }
   localStorage.setItem(TEACHER_ASSIGNMENTS_KEY, JSON.stringify(next));
+  localStorage.setItem(TEACHER_ASSIGNMENTS_SHUFFLE_VERSION_KEY, TEACHER_ASSIGNMENTS_SHUFFLE_VERSION);
   return next;
 };
 

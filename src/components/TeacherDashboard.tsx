@@ -31,6 +31,7 @@ import {
   getEnglish20LessonsByGrade
 } from '../data/practiceLessonsData';
 import { getSubjectRealStats, getLessonProgress } from '../services/progressTracker';
+import { shuffleQuestionOptions } from '../utils/answerOptionShuffle';
 
 interface TeacherDashboardProps {
   currentUser: UserAccount;
@@ -191,8 +192,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       }
     }
 
+    const lessonId = `teacher-custom-${Date.now()}`;
     const newLesson: Lesson = {
-      id: `teacher-custom-${Date.now()}`,
+      id: lessonId,
       title: `[Bài tập Giáo viên] ${newTitle.trim()}`,
       subjectId: newSubjectId,
       grade: currentUser.grade,
@@ -208,13 +210,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         `Bài tập do Giáo viên ${currentUser.fullName} biên soạn cho Lớp ${currentUser.className} (${currentUser.school}).`,
         'Hoàn thành đầy đủ các câu hỏi để giáo viên theo dõi kết quả trong bảng tổng kết lớp.',
       ],
-      sampleQuestions: customQuestions.map((q, idx) => ({
-        ...q,
-        id: `tcq-${Date.now()}-${idx + 1}`,
-        explanation:
-          q.explanation.trim() ||
-          `Đáp án đúng là ${String.fromCharCode(65 + q.correctIndex)}: ${q.options[q.correctIndex]}`,
-      })),
+      sampleQuestions: customQuestions.map((q, idx) => {
+        const id = `tcq-${Date.now()}-${idx + 1}`;
+        const shuffled = shuffleQuestionOptions(
+          q.options,
+          q.correctIndex,
+          `teacher-assignment:${lessonId}:${id}`
+        );
+        return {
+          ...q,
+          id,
+          options: shuffled.options,
+          correctIndex: shuffled.correctIndex,
+          explanation:
+            q.explanation.trim() ||
+            `Đáp án đúng là ${String.fromCharCode(65 + shuffled.correctIndex)}: ${shuffled.options[shuffled.correctIndex]}`,
+        };
+      }),
       isTeacherCustom: true,
       teacherEmail: currentUser.email.toLowerCase(),
       teacherName: currentUser.fullName,

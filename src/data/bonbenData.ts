@@ -1,4 +1,5 @@
 import { Subject, Lesson, GiftItem, LeaderboardUser, SkillDiagnosis, ArenaQuestion, QuizQuestion, ExerciseType, GradeLevel, ExamTest, DuelOpponent, StudentBadge, ArenaScheduleRound } from '../types';
+import { shuffleQuestionOptions } from '../utils/answerOptionShuffle';
 import mascotImage from '../assets/images/mascot_bonben_1793872988718.jpg';
 import heroImage from '../assets/images/hero_bonben_classroom_1793872988761.jpg';
 import giftsHeroImage from '../assets/images/gifts_bonben_rewards_1793872989067.jpg';
@@ -6,6 +7,26 @@ import giftsHeroImage from '../assets/images/gifts_bonben_rewards_1793872989067.
 export const MASCOT_IMAGE = mascotImage;
 export const HERO_IMAGE = heroImage;
 export const GIFTS_HERO_IMAGE = giftsHeroImage;
+
+const shuffleQuizBank = (questions: QuizQuestion[], seed: string): QuizQuestion[] =>
+  questions.map((question) => {
+    const shuffled = shuffleQuestionOptions(
+      question.options,
+      question.correctIndex,
+      `${seed}:${question.id}`
+    );
+    return { ...question, options: shuffled.options, correctIndex: shuffled.correctIndex };
+  });
+
+const shuffleArenaBank = (questions: ArenaQuestion[], seed: string): ArenaQuestion[] =>
+  questions.map((question) => {
+    const shuffled = shuffleQuestionOptions(
+      question.options,
+      question.correctAnswer,
+      `${seed}:${question.id}`
+    );
+    return { ...question, options: shuffled.options, correctAnswer: shuffled.correctIndex };
+  });
 
 export const SUBJECTS: Subject[] = [
   {
@@ -43,7 +64,7 @@ export const SUBJECTS: Subject[] = [
   }
 ];
 
-export const LESSON_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
+export const LESSON_PRACTICE_20_QUESTIONS: QuizQuestion[] = shuffleQuizBank([
   {
     id: 'lq1',
     question: 'Tính kết quả của phép tính: 2/7 + 3/7 = ?',
@@ -224,7 +245,7 @@ export const LESSON_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
     points: 15,
     difficulty: 'hard'
   }
-];
+], 'lesson-practice');
 
 export const SAMPLE_LESSONS: Lesson[] = [
   {
@@ -301,7 +322,7 @@ export const SAMPLE_LESSONS: Lesson[] = [
   }
 ];
 
-export const ARENA_QUESTIONS: ArenaQuestion[] = [
+export const ARENA_QUESTIONS: ArenaQuestion[] = shuffleArenaBank([
   {
     id: 'aq1',
     subject: 'Toán học',
@@ -482,9 +503,9 @@ export const ARENA_QUESTIONS: ArenaQuestion[] = [
     correctAnswer: 1,
     explanation: 'Thế kỷ 21 bắt đầu từ ngày 1/1/2001 và kết thúc vào ngày 31/12/2100.'
   }
-];
+], 'arena');
 
-export const OFFICIAL_EXAM_20_QUESTIONS: QuizQuestion[] = [
+export const OFFICIAL_EXAM_20_QUESTIONS: QuizQuestion[] = shuffleQuizBank([
   {
     id: 'eq1',
     question: 'Số gồm 7 trăm nghìn, 5 chục nghìn, 2 trăm và 6 đơn vị viết là:',
@@ -665,7 +686,7 @@ export const OFFICIAL_EXAM_20_QUESTIONS: QuizQuestion[] = [
     points: 5,
     difficulty: 'hard'
   }
-];
+], 'official-exam');
 
 export const GIFTS_CATALOG: GiftItem[] = [
   {
@@ -1555,7 +1576,7 @@ export const GRADE_EXERCISE_TYPES: Record<GradeLevel, ExerciseType[]> = {
 };
 
 // ==================== NGÂN HÀNG 20 CÂU HỎI TIẾNG VIỆT & NGỮ VĂN ====================
-export const VIETNAMESE_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
+export const VIETNAMESE_PRACTICE_20_QUESTIONS: QuizQuestion[] = shuffleQuizBank([
   {
     id: 'tv1',
     question: 'Trong các từ sau, từ nào là từ láy?',
@@ -1746,10 +1767,10 @@ export const VIETNAMESE_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
     points: 10,
     difficulty: 'hard'
   }
-];
+], 'vietnamese-practice');
 
 // ==================== NGÂN HÀNG 20 CÂU HỎI TIẾNG ANH (ENGLISH 20 QUESTIONS) ====================
-export const ENGLISH_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
+export const ENGLISH_PRACTICE_20_QUESTIONS: QuizQuestion[] = shuffleQuizBank([
   {
     id: 'en1',
     question: 'Choose the correct form: She ........... to school by bicycle every morning.',
@@ -1935,7 +1956,7 @@ export const ENGLISH_PRACTICE_20_QUESTIONS: QuizQuestion[] = [
     points: 10,
     difficulty: 'hard'
   }
-];
+], 'english-practice');
 
 // ==================== LỊCH THI ĐẤU ĐẤU TRƯỜNG VIOEDU THEO VÒNG (ARENA SCHEDULE) ====================
 export const ARENA_SCHEDULE_ROUNDS: ArenaScheduleRound[] = [

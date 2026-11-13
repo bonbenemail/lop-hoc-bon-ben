@@ -3,8 +3,29 @@ import {
   getMath20LessonsByGrade,
   getVietnamese20LessonsByGrade,
 } from '../src/data/practiceLessonsData';
+import { shuffleQuestionOptions } from '../src/utils/answerOptionShuffle';
+import { createServer } from 'vite';
+import type { Lesson, QuizQuestion } from '../src/types';
 
 const grades = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+const answerPositions = new Set<number>();
+for (let correctIndex = 0; correctIndex < 4; correctIndex++) {
+  for (let questionNumber = 0; questionNumber < 20; questionNumber++) {
+    const shuffled = shuffleQuestionOptions(
+      ['same', 'correct', 'same', 'other'],
+      correctIndex,
+      `utility-test:${correctIndex}:${questionNumber}`
+    );
+    if (shuffled.options[shuffled.correctIndex] !== ['same', 'correct', 'same', 'other'][correctIndex]) {
+      throw new Error('Shuffling changed the correct answer.');
+    }
+    answerPositions.add(shuffled.correctIndex);
+  }
+}
+if (answerPositions.size !== 4) {
+  throw new Error('The shuffle does not use all four answer positions.');
+}
 
 const getMathExpectedAnswers = (grade: number, lessonNumber: number): string[] => {
   const baseA = grade * 3 + lessonNumber;
@@ -114,4 +135,112 @@ for (const grade of grades) {
   );
 }
 
-console.log('Correct answers and varied positions verified for grades 1–12 in all three subjects.');
+const vite = await createServer({
+  configFile: false,
+  root: process.cwd(),
+  server: { middlewareMode: true },
+  appType: 'custom',
+});
+
+try {
+  const data = await vite.ssrLoadModule('/src/data/bonbenData.ts');
+  const staticBanks: Array<[string, Array<{ options: string[]; correctIndex: number }>]> = [
+    ['fallback math practice', data.LESSON_PRACTICE_20_QUESTIONS],
+    ['official exam', data.OFFICIAL_EXAM_20_QUESTIONS],
+    ['Vietnamese practice', data.VIETNAMESE_PRACTICE_20_QUESTIONS],
+    ['English practice', data.ENGLISH_PRACTICE_20_QUESTIONS],
+    ...data.MULTI_SUBJECT_EXAMS.map((exam: { title: string; questions: Array<{ options: string[]; correctIndex: number }> }) => [
+      exam.title,
+      exam.questions,
+    ]),
+  ];
+
+  for (const [bankName, questions] of staticBanks) {
+    const positions = new Set(questions.map((question) => question.correctIndex));
+    if (positions.size < 3) {
+      throw new Error(`${bankName} does not distribute correct answers across at least 3 positions.`);
+    }
+    if (questions.some((question) => question.correctIndex < 0 || question.correctIndex >= question.options.length)) {
+      throw new Error(`${bankName} contains an invalid correct answer index.`);
+    }
+  }
+
+  const arenaPositions = new Set(
+    (data.ARENA_QUESTIONS as Array<{ correctAnswer: number }>).map((question) => question.correctAnswer)
+  );
+  if (arenaPositions.size < 3) {
+    throw new Error('Arena questions do not distribute correct answers across at least 3 positions.');
+  }
+} finally {
+  await vite.close();
+}
+
+const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const storedValues = new Map<string, string>();
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key: string) => storedValues.get(key) ?? null,
+    setItem: (key: string, value: string) => storedValues.set(key, value),
+    removeItem: (key: string) => storedValues.delete(key),
+    clear: () => storedValues.clear(),
+  },
+});
+
+try {
+  const { getTeacherCustomAssignments } = await import('../src/services/schoolManager');
+  const legacyQuestions: QuizQuestion[] = Array.from({ length: 20 }, (_, index) => ({
+    id: `legacy-q${index + 1}`,
+    question: `Legacy question ${index + 1}`,
+    options: [`correct-${index + 1}`, 'wrong-b', 'wrong-c', 'wrong-d'],
+    correctIndex: 0,
+    explanation: `Đáp án đúng là A: correct-${index + 1}`,
+    points: 10,
+    difficulty: 'easy',
+  }));
+  const legacyLesson: Lesson = {
+    id: 'teacher-custom-legacy',
+    title: 'Legacy assignment',
+    subjectId: 'toan',
+    grade: 4,
+    duration: '20 phút',
+    difficulty: 'Cơ bản',
+    completionRate: 0,
+    xpReward: 0,
+    diamonds: 0,
+    description: 'Legacy assignment for migration test.',
+    keyPoints: [],
+    sampleQuestions: legacyQuestions,
+  };
+  storedValues.set('bonben_teacher_assignments', JSON.stringify([legacyLesson]));
+
+  const migrated = getTeacherCustomAssignments();
+  const migratedQuestions = migrated[0]?.sampleQuestions || [];
+  const migratedPositions = new Set(migratedQuestions.map((question) => question.correctIndex));
+  if (
+    migratedQuestions.some((question, index) => {
+      const correctAnswer = `correct-${index + 1}`;
+      return (
+        question.options[question.correctIndex] !== correctAnswer ||
+        question.explanation !==
+          `Đáp án đúng là ${String.fromCharCode(65 + question.correctIndex)}: ${correctAnswer}`
+      );
+    })
+  ) {
+    throw new Error('Migrating teacher assignments changed a correct answer or its explanation.');
+  }
+  if (migratedPositions.size < 3) {
+    throw new Error('Migrated teacher questions do not distribute correct answers across enough positions.');
+  }
+  if (JSON.stringify(getTeacherCustomAssignments()) !== JSON.stringify(migrated)) {
+    throw new Error('Teacher assignment migration is not stable across reads.');
+  }
+} finally {
+  if (localStorageDescriptor) {
+    Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+  } else {
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+}
+
+console.log('Correct answers and varied positions verified across all grades, subjects, static banks, exams, arena, and saved teacher assignments.');
