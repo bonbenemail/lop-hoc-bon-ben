@@ -811,6 +811,33 @@ export const GRADE_ANH_20_TOPICS: Record<GradeLevel, string[]> = {
 // HÀM SINH 20 CÂU HỎI CHUYÊN SÂU CHO TỪNG BÀI LUYỆN THEO ĐÚNG KHỐI LỚP
 // ============================================================================
 
+const shuffleQuestionOptions = (
+  options: string[],
+  correctIndex: number,
+  seed: string
+): { options: string[]; correctIndex: number } => {
+  const shuffledIndices = options.map((_, index) => index);
+  let state = 2166136261;
+
+  for (const character of seed) {
+    state = Math.imul(state ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+
+  for (let index = shuffledIndices.length - 1; index > 0; index--) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    const swapIndex = state % (index + 1);
+    [shuffledIndices[index], shuffledIndices[swapIndex]] = [
+      shuffledIndices[swapIndex],
+      shuffledIndices[index],
+    ];
+  }
+
+  return {
+    options: shuffledIndices.map((index) => options[index]),
+    correctIndex: shuffledIndices.indexOf(correctIndex),
+  };
+};
+
 const buildGradeMath20Questions = (
   grade: GradeLevel,
   lessonIdx: number,
@@ -981,11 +1008,12 @@ const buildGradeMath20Questions = (
   for (let i = 0; i < 20; i++) {
     const t = templates[i % templates.length];
     const round = Math.floor(i / templates.length);
+    const shuffled = shuffleQuestionOptions(t.opts, t.ans, `math:${grade}:${lessonIdx}:${i}`);
     questions.push({
       id: `toan-g${grade}-b${lessonIdx}-q${i + 1}`,
       question: round === 0 ? t.q : `(Câu ${i + 1}/20) ${t.q}`,
-      options: t.opts,
-      correctIndex: t.ans,
+      options: shuffled.options,
+      correctIndex: shuffled.correctIndex,
       explanation: t.exp,
       points: 10,
       difficulty: i < 8 ? 'easy' : i < 15 ? 'medium' : 'hard',
@@ -1097,34 +1125,18 @@ const buildGradeVan20Questions = (
   for (let i = 0; i < 20; i++) {
     const t = templates[i % templates.length];
     const round = Math.floor(i / templates.length);
+    const shuffled = shuffleQuestionOptions(t.opts, t.ans, `vietnamese:${grade}:${lessonIdx}:${i}`);
     questions.push({
       id: `van-g${grade}-b${lessonIdx}-q${i + 1}`,
       question: round === 0 ? t.q : `(Câu ${i + 1}/20) ${t.q}`,
-      options: t.opts,
-      correctIndex: t.ans,
+      options: shuffled.options,
+      correctIndex: shuffled.correctIndex,
       explanation: t.exp,
       points: 10,
       difficulty: i < 8 ? 'easy' : i < 15 ? 'medium' : 'hard',
     });
   }
   return questions;
-};
-
-const shuffleEnglishOptions = (options: string[], seed: string): string[] => {
-  const shuffled = [...options];
-  let state = 2166136261;
-
-  for (const character of seed) {
-    state = Math.imul(state ^ character.charCodeAt(0), 16777619) >>> 0;
-  }
-
-  for (let index = shuffled.length - 1; index > 0; index--) {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    const swapIndex = state % (index + 1);
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-
-  return shuffled;
 };
 
 const buildGradeAnh20Questions = (
@@ -1209,12 +1221,12 @@ const buildGradeAnh20Questions = (
   for (let i = 0; i < 20; i++) {
     const t = templates[i % templates.length];
     const round = Math.floor(i / templates.length);
-    const options = shuffleEnglishOptions(t.opts, `${grade}:${lessonIdx}:${i}`);
+    const shuffled = shuffleQuestionOptions(t.opts, t.ans, `english:${grade}:${lessonIdx}:${i}`);
     questions.push({
       id: `anh-g${grade}-b${lessonIdx}-q${i + 1}`,
       question: round === 0 ? t.q : `(Question ${i + 1}/20) ${t.q}`,
-      options,
-      correctIndex: options.indexOf(t.opts[t.ans]),
+      options: shuffled.options,
+      correctIndex: shuffled.correctIndex,
       explanation: t.exp,
       points: 10,
       difficulty: i < 8 ? 'easy' : i < 15 ? 'medium' : 'hard',
