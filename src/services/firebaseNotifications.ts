@@ -658,6 +658,7 @@ export const deleteUserAccount = async (
     console.error('FIREBASE_ADMIN_ID_TOKEN_ERROR:', error);
   }
 
+  // Thử gọi API serverless để xóa tận gốc trong Firebase Authentication.
   try {
     const response = await fetch('/api/delete-user', {
       method: 'POST',
@@ -668,24 +669,32 @@ export const deleteUserAccount = async (
       body: JSON.stringify({ uid, email }),
     });
 
-    if (response.ok) return 'server';
-
-    // 404: backend serverless chưa có (ví dụ khi chạy dev cục bộ).
-    if (response.status === 404) {
-      await deleteFirebaseUser(uid, email);
-      return 'client';
+    const contentType = response.headers.get('content-type') || '';
+    // Chỉ coi là thành công khi máy chủ trả JSON { ok: true }.
+    // Nếu API chưa được triển khai, SPA fallback có thể trả index.html với status 200
+    // -> PHẢI loại bỏ để tránh báo "thành công" giả.
+    if (contentType.includes('application/json')) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (response.ok && payload.ok === true) {
+        return 'server';
+      }
+      if (payload.message) {
+        console.warn('DELETE_USER_SERVER_REJECTED:', payload.message);
+      }
     }
-
-    const payload = (await response.json().catch(() => ({}))) as { message?: string };
-    throw new Error(payload.message || 'Không thể xóa tài khoản trên máy chủ.');
   } catch (error) {
-    if (error instanceof TypeError) {
-      // Không kết nối được API: dọn dữ liệu Firestore phía client.
-      await deleteFirebaseUser(uid, email);
-      return 'client';
-    }
-    throw error;
+    // Không kết nối được API: sẽ tự dọn Firestore phía client bên dưới.
+    console.warn('DELETE_USER_SERVER_UNAVAILABLE:', error);
   }
+
+  // Luôn dọn sạch dữ liệu Firestore phía client (rules cho phép Admin).
+  // Đây là bước quyết định để tài khoản thật sự biến mất khỏi danh sách.
+  await deleteFirebaseUser(uid, email);
+
+  return 'client';
 };
 
 export const createManagedFirebaseProfile = async (
