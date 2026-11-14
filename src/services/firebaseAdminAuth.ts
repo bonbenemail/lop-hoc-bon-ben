@@ -2,7 +2,6 @@ import { getApps, initializeApp, type FirebaseOptions } from 'firebase/app';
 import {
   getAuth,
   onAuthStateChanged,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -88,15 +87,7 @@ export const signInAdminWithFirebase = async (email: string, password: string): 
     }
     throw error;
   }
-  if (!credential.user.emailVerified) {
-    try {
-      await sendEmailVerification(credential.user);
-    } finally {
-      await signOut(auth);
-    }
-    throw new Error('Email Admin chưa được xác minh. Firebase đã gửi liên kết xác minh tới hộp thư.');
-  }
-
+  // Không chặn theo emailVerified và không gửi link xác minh của Firebase.
   return credential.user;
 };
 

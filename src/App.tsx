@@ -74,7 +74,8 @@ export default function App() {
     let unsubscribe: () => void = () => {};
     try {
       unsubscribe = subscribeToFirebaseAdmin((firebaseUser) => {
-        if (firebaseUser?.emailVerified) {
+        // Không chặn theo emailVerified: tài khoản đã xác thực bằng mã OTP 6 số.
+        if (firebaseUser) {
           adminAuthSessionRestored.current =
             firebaseUser.email?.toLowerCase() === FIREBASE_ADMIN_EMAIL;
           setFirebaseUid(firebaseUser.uid);
@@ -108,15 +109,13 @@ export default function App() {
           return;
         }
 
+        // Chỉ tới đây khi chưa có phiên Firebase (đã đăng xuất).
         setFirebaseUid(null);
-        if (firebaseUser) {
-          void signOutFirebaseAdmin();
-        }
         if (adminAuthSessionRestored.current) {
           adminAuthSessionRestored.current = false;
           setCurrentUser((user) => (user?.role === 'admin' ? null : user));
           setActivePage('home');
-        } else if (!firebaseUser) {
+        } else {
           setCurrentUser(null);
           setActivePage('home');
         }

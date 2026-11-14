@@ -151,6 +151,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [adminEditClass, setAdminEditClass] = useState('');
   const [adminEditSchool, setAdminEditSchool] = useState('');
   const [adminActionBanner, setAdminActionBanner] = useState<string | null>(null);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState<string | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // 6-digit Email OTP verification state (never rendered on web UI, only sent via Gmail)
   const [generatedOtp, setGeneratedOtp] = useState<string>('');
@@ -512,11 +514,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     if (finalRole === 'teacher') {
       setSuccessMessage(
-        `Tài khoản Giáo viên đã tạo (${newAccount.fullName} · Dạy Lớp ${cleanClass} - ${cleanSchool}) và đang chờ Admin xét duyệt. Hãy xác minh địa chỉ email bằng liên kết Firebase vừa gửi rồi đăng nhập.`
+        `Tài khoản Giáo viên đã tạo (${newAccount.fullName} · Dạy Lớp ${cleanClass} - ${cleanSchool}) và đang chờ Admin xét duyệt. Xác thực mã 6 số đã hoàn tất, bạn có thể đăng nhập để sử dụng ngay.`
       );
     } else {
       setSuccessMessage(
-        `Tài khoản đã tạo (${newAccount.fullName} · Lớp ${cleanClass} · ${cleanSchool}). Hãy xác minh email bằng liên kết Firebase vừa gửi rồi đăng nhập để mở hộp thư thông báo.`
+        `Tài khoản đã tạo thành công (${newAccount.fullName} · Lớp ${cleanClass} · ${cleanSchool}). Bạn có thể đăng nhập và vào web sử dụng ngay để mở hộp thư thông báo.`
       );
     }
 
@@ -705,12 +707,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrors({ adminDelete: 'Không tìm thấy Firebase UID của tài khoản.' });
       return;
     }
-    const confirmed = window.confirm(
-      `Xóa vĩnh viễn tài khoản ${target.fullName} (${target.email})?\n\nToàn bộ dữ liệu liên quan trên Firebase (hồ sơ, thông báo, thư hỗ trợ...) cũng sẽ bị xóa và KHÔNG thể khôi phục.`
-    );
-    if (!confirmed) return;
+    setIsDeletingAccount(true);
+    setErrors({});
     try {
       const mode = await deleteUserAccount(target.firebaseUid, target.email);
+      setDeleteConfirmEmail(null);
       setAdminActionBanner(
         mode === 'server'
           ? `Đã xóa tận gốc tài khoản ${target.fullName} khỏi Firebase Authentication và Firestore.`
@@ -719,6 +720,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } catch (error: unknown) {
       console.error('FIREBASE_ADMIN_ACCOUNT_DELETE_ERROR:', error);
       setErrors({ adminDelete: error instanceof Error ? error.message : 'Không thể xóa tài khoản.' });
+    } finally {
+      setIsDeletingAccount(false);
     }
     setTimeout(() => setAdminActionBanner(null), 4000);
   };
@@ -1254,7 +1257,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               type="button"
                               onClick={() => {
                                 setEditingInfoEmail(null);
-                                void handleAdminDeleteStudentAccount(st.email);
+                                setErrors({});
+                                setDeleteConfirmEmail(st.email);
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
                             >
@@ -2704,6 +2708,73 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           ? 'Gửi liên kết đặt lại'
                           : 'Gửi mã 6 số ngay'}
                       </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* XÁC NHẬN XÓA TÀI KHOẢN (thay cho window.confirm để hoạt động cả trong iframe/preview) */}
+        {deleteConfirmEmail && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white rounded-3xl border border-red-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm sm:text-base">
+                    Xác nhận xóa tài khoản
+                  </h4>
+                  <p className="text-xs text-slate-500">Hành động này không thể hoàn tác</p>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-700 space-y-1">
+                <p className="font-bold text-slate-900">
+                  {registeredStudents.find(
+                    (item) => item.email.toLowerCase() === deleteConfirmEmail.toLowerCase()
+                  )?.fullName || 'Tài khoản'}
+                </p>
+                <p className="font-mono text-slate-500 break-all">{deleteConfirmEmail}</p>
+                <p className="pt-1">
+                  Toàn bộ dữ liệu liên quan trên Firebase (hồ sơ, thông báo, thư hỗ trợ...) cũng sẽ bị xóa
+                  vĩnh viễn.
+                </p>
+                {errors.adminDelete && (
+                  <p className="text-red-600 font-bold pt-1">{errors.adminDelete}</p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={() => {
+                    setDeleteConfirmEmail(null);
+                    setErrors({});
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={() => void handleAdminDeleteStudentAccount(deleteConfirmEmail)}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:bg-red-300 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {isDeletingAccount ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang xóa...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa vĩnh viễn</span>
                     </>
                   )}
                 </button>

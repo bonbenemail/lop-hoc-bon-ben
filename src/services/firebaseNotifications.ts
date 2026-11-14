@@ -4,7 +4,6 @@ import {
   deleteUser,
   getAuth,
   sendPasswordResetEmail,
-  sendEmailVerification,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -60,7 +59,8 @@ export const registerFirebaseUser = async (
     password
   );
   try {
-    await sendEmailVerification(credential.user);
+    // KHÔNG gọi sendEmailVerification: mã OTP 6 số đã xác thực qua email,
+    // người dùng nhập đúng mã là hoàn tất đăng ký, không cần link xác minh của Firebase.
     await updateProfile(credential.user, { displayName: account.fullName });
     await setDoc(
       doc(getUsersCollection(), credential.user.uid),
@@ -99,21 +99,10 @@ export const signInFirebaseUser = async (
       email.trim().toLowerCase(),
       password
     );
-    if (!credential.user.emailVerified) {
-      try {
-        await sendEmailVerification(credential.user);
-      } finally {
-        await signOut(auth);
-      }
-      throw new Error(
-        'Email chưa được xác minh bằng Firebase. Hệ thống đã gửi liên kết xác minh mới; hãy mở email rồi đăng nhập lại.'
-      );
-    }
+    // Không chặn theo emailVerified của Firebase nữa: tài khoản đã được
+    // xác thực bằng mã OTP 6 số gửi về email khi đăng ký.
     return credential.user;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('chưa được xác minh')) {
-      throw error;
-    }
     const code = getFirebaseErrorCode(error);
     if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
       throw new Error('Email hoặc mật khẩu không chính xác.');
@@ -717,7 +706,7 @@ export const createManagedFirebaseProfile = async (
     password
   );
   try {
-    await sendEmailVerification(credential.user);
+    // Không gửi link xác minh của Firebase cho tài khoản do Admin tạo.
     await updateProfile(credential.user, { displayName: account.fullName });
     await setDoc(
       doc(getUsersCollection(), credential.user.uid),
