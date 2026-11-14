@@ -5,7 +5,7 @@ import type { SchoolDirectoryEntry } from '../src/types';
 
 const sourceUrl = 'https://overpass.openstreetmap.fr/api/interpreter';
 const query =
-  '[out:json][timeout:120];area["ISO3166-1"="VN"]["admin_level"="2"]->.vn;nwr["amenity"="school"]["name"](area.vn);out center tags;';
+  '[out:json][timeout:120];area["ISO3166-1"="VN"]["admin_level"="2"]->.vn;(nwr["amenity"="school"]["name"](area.vn);nwr["school"]["name"](area.vn););out center tags;';
 
 interface OsmElement {
   type: 'node' | 'way' | 'relation';
@@ -83,8 +83,15 @@ const entries = new Map<string, SchoolDirectoryEntry>();
 
 for (const element of result.elements) {
   const name = element.tags.name?.trim();
-  const provinceName = element.tags['addr:province'] || element.tags['addr:city'];
-  const wardName = element.tags['addr:ward'] || element.tags['addr:subdistrict'];
+  const provinceName =
+    element.tags['addr:province'] ||
+    element.tags['addr:city'] ||
+    element.tags['addr:state'];
+  const wardName =
+    element.tags['addr:ward'] ||
+    element.tags['addr:subdistrict'] ||
+    element.tags['addr:hamlet'] ||
+    element.tags['addr:place'];
   if (!name || !provinceName || !wardName) continue;
 
   const province = provinceByName.get(normalize(provinceName));

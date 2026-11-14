@@ -1,6 +1,6 @@
 import type { SchoolDirectoryEntry } from '../types';
 
-export const VIETNAM_OSM_SCHOOLS_UPDATED_AT = "2026-11-14T02:09:48.970Z";
+export const VIETNAM_OSM_SCHOOLS_UPDATED_AT = "2026-11-14T02:32:13.441Z";
 export const VIETNAM_OSM_SCHOOLS_SOURCE = "https://overpass.openstreetmap.fr/api/interpreter";
 export const VIETNAM_OSM_SCHOOLS: SchoolDirectoryEntry[] = [
   {

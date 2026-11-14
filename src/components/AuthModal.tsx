@@ -168,6 +168,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const registrationProvince = VIETNAM_ADMIN_UNITS.find((province) => province.name === provinceInput);
   const profileProvince = VIETNAM_ADMIN_UNITS.find((province) => province.name === editProvince);
+  const registrationSchools = schoolDirectory.filter(
+    (entry) =>
+      (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
+      entry.provinceOrCity === provinceInput &&
+      entry.district === districtInput
+  );
+  const profileSchools = schoolDirectory.filter(
+    (entry) =>
+      (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
+      entry.provinceOrCity === editProvince &&
+      entry.district === editDistrict
+  );
 
   // Helper to get registered & Gmail-OTP-verified accounts from localStorage
   const getRegisteredGmailAccounts = (): UserAccount[] => {
@@ -1700,20 +1712,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {editSchoolId === '__current__' && currentUser.school && (
                         <option value="__current__">{currentUser.school} (trường hiện tại)</option>
                       )}
-                      {schoolDirectory
-                        .filter((entry) =>
-                          (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
-                          entry.provinceOrCity === editProvince &&
-                          entry.district === editDistrict
-                        )
-                        .map((entry) => (
+                      {profileSchools.map((entry) => (
                           <option key={entry.id} value={entry.id}>{entry.schoolName}</option>
-                        ))}
+                      ))}
                     </select>
                   </div>
-                  {schoolDirectory.length === 0 && (
+                  {editDistrict && profileSchools.length === 0 && (
                     <p className="mt-1 text-[11px] text-amber-700">
-                      Chưa có trường phù hợp. Vui lòng liên hệ Admin để thêm trường.
+                      Chưa có trường trong xã này ở danh mục dữ liệu hiện có. Không hiển thị trường của xã khác; hãy nhờ Admin bổ sung trường còn thiếu.
                     </p>
                   )}
                   <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
@@ -2219,27 +2225,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         <select
                           required
                           value={schoolInput}
-                          disabled={!districtInput}
+                          disabled={!districtInput || registrationSchools.length === 0}
                           onChange={(e) => setSchoolInput(e.target.value)}
                           className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
                             errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
                           }`}
                         >
-                          <option value="">Chọn trường</option>
-                          {schoolDirectory
-                            .filter((entry) =>
-                              (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
-                              entry.provinceOrCity === provinceInput &&
-                              entry.district === districtInput
-                            )
-                            .map((entry) => (
+                          <option value="">
+                            {!districtInput
+                              ? 'Chọn phường/xã trước'
+                              : registrationSchools.length === 0
+                                ? 'Xã này chưa có trường trong danh mục'
+                                : 'Chọn trường'}
+                          </option>
+                          {registrationSchools.map((entry) => (
                               <option key={entry.id} value={entry.schoolName}>{entry.schoolName}</option>
-                            ))}
+                          ))}
                         </select>
                       </div>
-                      {schoolDirectory.length === 0 && (
+                      {districtInput && registrationSchools.length === 0 && (
                         <p className="text-[11px] text-amber-700 mt-2">
-                          Chưa có trường phù hợp. Vui lòng liên hệ Admin để thêm trường trước khi đăng ký.
+                          Danh sách hiện có chưa có trường được xác minh thuộc xã này. Trường từ xã khác không được hiển thị; Admin cần bổ sung dữ liệu trường còn thiếu.
                         </p>
                       )}
                       <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
