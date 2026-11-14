@@ -10,17 +10,11 @@ import {
   Building2,
   GraduationCap,
   MessageSquare,
+  Inbox,
   Loader2
 } from 'lucide-react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { GradeLevel, UserAccount } from '../types';
 import { MASCOT_IMAGE } from '../data/bonbenData';
-import {
-  initAuth,
-  googleSignIn,
-  logoutGmail,
-  sendSupportEmailViaGmail
-} from '../services/gmailAuth';
 import { getConfiguredMascotImage } from '../services/schoolManager';
 import { submitSupportTicket } from '../services/firebaseNotifications';
 
@@ -46,10 +40,6 @@ export const SupportModal: React.FC<SupportModalProps> = ({
   const [topic, setTopic] = useState('Hỗ trợ tài khoản & mật khẩu');
   const [issueContent, setIssueContent] = useState('');
 
-  const [needsGmailAuth, setNeedsGmailAuth] = useState<boolean>(false);
-  const [isSigningInGmail, setIsSigningInGmail] = useState<boolean>(false);
-
-  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [isSending, setIsSending] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sentSuccess, setSentSuccess] = useState<boolean>(false);
@@ -71,29 +61,8 @@ export const SupportModal: React.FC<SupportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleGoogleSignInClick = async () => {
-    setIsSigningInGmail(true);
-    setErrorMsg(null);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setNeedsGmailAuth(false);
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Đăng nhập Google thất bại.';
-      setErrorMsg(msg);
-    } finally {
-      setIsSigningInGmail(false);
-    }
-  };
-
-  const handleDisconnectGmail = async () => {
-    await logoutGmail();
-    setNeedsGmailAuth(true);
-  };
-
-  const handlePrepareSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setErrorMsg(null);
 
     if (!senderName.trim()) {
@@ -109,37 +78,26 @@ export const SupportModal: React.FC<SupportModalProps> = ({
       return;
     }
 
-    setShowConfirmModal(true);
-  };
-
-  const executeSendSupportTicket = async () => {
     setIsSending(true);
-    setErrorMsg(null);
-    const ticketPayload = {
-      senderName: senderName.trim(),
-      senderEmail: senderEmail.trim().toLowerCase(),
-      senderUid: currentUser?.firebaseUid,
-      gradeInfo: gradeInfo.trim() || `Lớp ${currentGrade}`,
-      schoolInfo: schoolInfo.trim(),
-      topic,
-      issueContent: issueContent.trim(),
-    };
     try {
-      // Lưu thư hỗ trợ lên Firebase trước để hộp thư Admin đồng bộ trên mọi thiết bị.
-      try {
-        await submitSupportTicket(ticketPayload);
-      } catch (syncError) {
-        console.error('SUPPORT_TICKET_SYNC_ERROR:', syncError);
-      }
-      await sendSupportEmailViaGmail(ticketPayload);
-      setShowConfirmModal(false);
+      // Ghi trực tiếp vào hộp thư hỗ trợ của Admin trên Firebase, tự động đồng bộ
+      // tới mọi thiết bị. Không gửi qua email để tiết kiệm chi phí.
+      await submitSupportTicket({
+        senderName: senderName.trim(),
+        senderEmail: senderEmail.trim().toLowerCase(),
+        senderUid: currentUser?.firebaseUid,
+        gradeInfo: gradeInfo.trim() || `Lớp ${currentGrade}`,
+        schoolInfo: schoolInfo.trim(),
+        topic,
+        issueContent: issueContent.trim(),
+      });
       setSentSuccess(true);
       setIssueContent('');
     } catch (err: unknown) {
       const msg =
         err instanceof Error
           ? err.message
-          : 'Không thể gửi yêu cầu hỗ trợ. Vui lòng kiểm tra cấu hình máy chủ gửi email.';
+          : 'Không thể gửi yêu cầu hỗ trợ tới hộp thư Admin. Vui lòng thử lại.';
       setErrorMsg(msg);
     } finally {
       setIsSending(false);
@@ -184,15 +142,15 @@ export const SupportModal: React.FC<SupportModalProps> = ({
 
         {/* Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-5">
-          {/* Auto-email flow without Google linking */}
+          {/* Yêu cầu hỗ trợ được ghi thẳng vào hộp thư Admin trên Firebase */}
           <div className="p-3.5 rounded-2xl border border-sky-200 bg-sky-50/70 flex items-start sm:items-center justify-between gap-3">
             <div className="text-xs">
               <div className="flex items-center gap-1.5 font-extrabold text-sky-950">
-                <Mail className="w-3.5 h-3.5 text-sky-600" />
-                <span>Gửi yêu cầu hỗ trợ qua email đăng ký</span>
+                <Inbox className="w-3.5 h-3.5 text-sky-600" />
+                <span>Gửi thẳng vào hộp thư hỗ trợ của Admin</span>
               </div>
               <p className="text-[11px] text-slate-600 mt-0.5">
-                Máy chủ sẽ gửi yêu cầu từ bonbenemail@gmail.com tới Ban Quản Trị và gửi bản sao tới email liên hệ, không cần đăng nhập Google.
+                Yêu cầu được lưu trên hệ thống và tự động đồng bộ tới hộp thư hỗ trợ của Ban Quản Trị, không cần gửi qua email.
               </p>
             </div>
 
@@ -240,7 +198,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({
               </div>
             </div>
           ) : (
-            <form onSubmit={handlePrepareSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -356,134 +314,24 @@ export const SupportModal: React.FC<SupportModalProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-sm rounded-2xl shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
+                disabled={isSending}
+                className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 disabled:from-sky-400 disabled:to-blue-400 text-white font-extrabold text-sm rounded-2xl shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
               >
-                <Send className="w-4 h-4" />
-                <span>Gửi yêu cầu hỗ trợ ngay</span>
+                {isSending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang gửi tới hộp thư Admin...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Gửi yêu cầu hỗ trợ ngay</span>
+                  </>
+                )}
               </button>
             </form>
           )}
         </div>
-
-        {/* Mandatory Confirmation Modal before sending support email via Gmail API */}
-        {showConfirmModal && (
-          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
-            <div className="bg-white rounded-3xl border border-sky-200 shadow-2xl max-w-md w-full p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
-                  <Send className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-sm sm:text-base">
-                    Xác nhận gửi yêu cầu hỗ trợ
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Nội dung sẽ được chuyển tới hộp thư Ban Quản Trị Lớp học Bon Ben
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-sky-50/80 rounded-2xl p-4 border border-sky-200 text-xs space-y-2">
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-500 font-medium">Nơi tiếp nhận:</span>
-                  <strong className="text-sky-900 font-bold">Ban Quản Trị Lớp học Bon Ben</strong>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-500 font-medium">Người gửi:</span>
-                  <strong className="text-slate-800">
-                    {senderName.trim()} ({senderEmail.trim().toLowerCase()})
-                  </strong>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-500 font-medium">Chủ đề:</span>
-                  <strong className="text-sky-700 text-right">{topic}</strong>
-                </div>
-                <div className="pt-1 border-t border-sky-200/60">
-                  <span className="text-slate-500 font-medium block mb-1">Nội dung vấn đề:</span>
-                  <p className="text-slate-800 bg-white p-2.5 rounded-xl border border-sky-100 max-h-28 overflow-y-auto whitespace-pre-wrap">
-                    {issueContent.trim()}
-                  </p>
-                </div>
-              </div>
-
-              {needsGmailAuth && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                  <p className="font-semibold">
-                    Vui lòng nhấn nút bên dưới để đăng nhập Google cấp quyền gửi thư hỗ trợ:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignInClick}
-                    disabled={isSigningInGmail}
-                    className="gsi-material-button w-full inline-flex items-center justify-center gap-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-300 shadow-2xs transition-all cursor-pointer"
-                  >
-                    <div className="gsi-material-button-state" />
-                    <div className="gsi-material-button-content-wrapper flex items-center gap-2">
-                      <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                        <svg
-                          version="1.1"
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 48 48"
-                          className="w-4 h-4 block"
-                        >
-                          <path
-                            fill="#EA4335"
-                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                          />
-                          <path
-                            fill="#4285F4"
-                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                          />
-                          <path
-                            fill="#FBBC05"
-                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                          />
-                          <path
-                            fill="#34A853"
-                            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                          />
-                          <path fill="none" d="M0 0h48v48H0z" />
-                        </svg>
-                      </div>
-                      <span className="gsi-material-button-contents">
-                        {isSigningInGmail ? 'Đang kết nối Google...' : 'Sign in with Google'}
-                      </span>
-                    </div>
-                  </button>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isSending}
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-                >
-                  Hủy bỏ
-                </button>
-                <button
-                  type="button"
-                  disabled={isSending}
-                  onClick={executeSendSupportTicket}
-                  className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-400 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  {isSending ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Đang gửi về Gmail...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Xác nhận gửi ngay</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
