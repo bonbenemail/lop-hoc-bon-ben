@@ -132,13 +132,6 @@ service cloud.firestore {
       }
     }
 
-    // Bia mộ tài khoản đã bị Admin xóa: Admin ghi khi xóa tài khoản, người dùng
-    // đọc bản ghi của chính mình để bị chặn đăng nhập lại và tạo lại hồ sơ.
-    match /deletedAccounts/{uid} {
-      allow get: if isAdmin() || (request.auth != null && request.auth.uid == uid);
-      allow create, update, delete: if isAdmin();
-    }
-
     // Hộp thư hỗ trợ dùng chung: người dùng gửi (kể cả khách) có thể tạo thư,
     // chỉ Admin đọc/quản lý để đồng bộ trên mọi thiết bị.
     match /supportTickets/{ticketId} {

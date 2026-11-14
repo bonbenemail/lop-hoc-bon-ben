@@ -56,7 +56,7 @@ import { AdminSupportInbox } from './AdminSupportInbox';
 import {
   createManagedFirebaseProfile,
   firebaseProfileToUserAccount,
-  deleteFirebaseUser,
+  deleteUserAccount,
   saveManagedFirebaseProfile,
   sendFirebaseUserPasswordReset,
   subscribeToFirebaseUsers,
@@ -155,7 +155,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editDiamonds, setEditDiamonds] = useState('0');
   const [editLevel, setEditLevel] = useState('1');
   const [editStudentCode, setEditStudentCode] = useState('');
-  const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
 
   // State sửa trực tiếp trang web
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => getSiteConfig());
@@ -597,10 +596,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify('⚠️ Không tìm thấy Firebase UID của tài khoản.', true);
       return;
     }
+    const confirmed = window.confirm(
+      `Xóa vĩnh viễn tài khoản ${account.fullName} (${account.email})?\n\nToàn bộ dữ liệu liên quan trên Firebase (hồ sơ, thông báo, thư hỗ trợ...) cũng sẽ bị xóa và KHÔNG thể khôi phục.`
+    );
+    if (!confirmed) return;
     try {
-      await deleteFirebaseUser(account.firebaseUid, account.email);
-      setDeletingEmail(null);
-      notify(`Đã xóa tài khoản ${account.fullName} (${account.email}) khỏi Firebase.`);
+      const mode = await deleteUserAccount(account.firebaseUid, account.email);
+      notify(
+        mode === 'server'
+          ? `✅ Đã xóa tận gốc tài khoản ${account.fullName} (${account.email}) khỏi Firebase Authentication và Firestore.`
+          : `✅ Đã xóa tài khoản ${account.fullName} (${account.email}) và dữ liệu liên quan trên Firestore. Máy chủ xóa Authentication chưa được triển khai.`
+      );
     } catch (error: unknown) {
       console.error('FIREBASE_ADMIN_ACCOUNT_DELETE_ERROR:', error);
       notify(
@@ -1310,7 +1316,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               {filteredAccounts.map((acc) => {
                 const emailKey = acc.email.toLowerCase();
                 const isEditingInfo = editingInfoEmail === emailKey;
-                const isDeleting = deletingEmail === emailKey;
 
                 return (
                   <div
@@ -1464,7 +1469,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => setDeletingEmail(isDeleting ? null : emailKey)}
+                              onClick={() => handleDeleteAccount(acc.email)}
                               className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -1687,30 +1692,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         >
                           Lưu hồ sơ
                         </button>
-                      </div>
-                    )}
-
-                    {isDeleting && (
-                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex items-center justify-between gap-2 text-xs">
-                        <span className="font-bold text-red-800">
-                          Xóa tài khoản {acc.fullName} ({acc.email})? Tài khoản sẽ bị xóa khỏi hệ thống và không thể đăng nhập lại.
-                        </span>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteAccount(acc.email)}
-                            className="px-3 py-1 bg-red-600 text-white font-extrabold rounded-lg cursor-pointer"
-                          >
-                            Xác nhận xóa
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeletingEmail(null)}
-                            className="px-3 py-1 bg-white text-slate-700 border border-slate-200 font-bold rounded-lg cursor-pointer"
-                          >
-                            Hủy
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>

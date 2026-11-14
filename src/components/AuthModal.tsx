@@ -48,7 +48,7 @@ import {
   signInFirebaseUser,
   subscribeToFirebaseUsers,
   upsertAuthenticatedFirebaseUser,
-  deleteFirebaseUser,
+  deleteUserAccount,
 } from '../services/firebaseNotifications';
 import {
   getSchoolDirectory,
@@ -150,7 +150,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [adminEditGrade, setAdminEditGrade] = useState<GradeLevel>(4);
   const [adminEditClass, setAdminEditClass] = useState('');
   const [adminEditSchool, setAdminEditSchool] = useState('');
-  const [deletingEmailConfirm, setDeletingEmailConfirm] = useState<string | null>(null);
   const [adminActionBanner, setAdminActionBanner] = useState<string | null>(null);
 
   // 6-digit Email OTP verification state (never rendered on web UI, only sent via Gmail)
@@ -706,10 +705,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrors({ adminDelete: 'Không tìm thấy Firebase UID của tài khoản.' });
       return;
     }
+    const confirmed = window.confirm(
+      `Xóa vĩnh viễn tài khoản ${target.fullName} (${target.email})?\n\nToàn bộ dữ liệu liên quan trên Firebase (hồ sơ, thông báo, thư hỗ trợ...) cũng sẽ bị xóa và KHÔNG thể khôi phục.`
+    );
+    if (!confirmed) return;
     try {
-      await deleteFirebaseUser(target.firebaseUid, target.email);
-      setDeletingEmailConfirm(null);
-      setAdminActionBanner(`Đã xóa tài khoản ${target.fullName}.`);
+      const mode = await deleteUserAccount(target.firebaseUid, target.email);
+      setAdminActionBanner(
+        mode === 'server'
+          ? `Đã xóa tận gốc tài khoản ${target.fullName} khỏi Firebase Authentication và Firestore.`
+          : `Đã xóa tài khoản ${target.fullName} và dữ liệu liên quan trên Firestore (máy chủ xóa Authentication chưa được triển khai).`
+      );
     } catch (error: unknown) {
       console.error('FIREBASE_ADMIN_ACCOUNT_DELETE_ERROR:', error);
       setErrors({ adminDelete: error instanceof Error ? error.message : 'Không thể xóa tài khoản.' });
@@ -1095,7 +1101,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     })
                     .map((st) => {
                     const isEditingInfo = editingInfoEmail === st.email;
-                    const isDeleting = deletingEmailConfirm === st.email;
 
                     return (
                       <div
@@ -1223,7 +1228,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 setAdminEditGrade(st.grade);
                                 setAdminEditClass(st.className || `${st.grade}A1`);
                                 setAdminEditSchool(st.school || '');
-                                setDeletingEmailConfirm(null);
                                 setErrors({});
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
@@ -1249,8 +1253,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                setDeletingEmailConfirm(isDeleting ? null : st.email);
                                 setEditingInfoEmail(null);
+                                void handleAdminDeleteStudentAccount(st.email);
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
                             >
@@ -1326,31 +1330,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 {errors.adminEditInfo}
                               </p>
                             )}
-                          </div>
-                        )}
-
-                        {/* Delete Confirmation Inline Box */}
-                        {isDeleting && (
-                          <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
-                            <p className="text-xs text-red-800 font-bold">
-                              Xóa tài khoản <strong>{st.fullName}</strong> ({st.email})? Tài khoản sẽ bị xóa khỏi hệ thống và không thể đăng nhập lại.
-                            </p>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handleAdminDeleteStudentAccount(st.email)}
-                                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-lg cursor-pointer"
-                              >
-                                Xác nhận xóa
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDeletingEmailConfirm(null)}
-                                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg border border-slate-200 cursor-pointer"
-                              >
-                                Không xóa
-                              </button>
-                            </div>
                           </div>
                         )}
                       </div>

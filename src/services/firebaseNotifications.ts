@@ -44,9 +44,6 @@ import {
 const getDb = () => getFirestore(getFirebaseApp());
 const getUsersCollection = () => collection(getDb(), 'users');
 const getLegacyProfilesCollection = () => collection(getDb(), 'userProfiles');
-// Bia mộ tài khoản đã bị Admin xóa: giữ lại để chặn tài khoản Firebase Auth
-// đăng nhập lại và tự tạo lại hồ sơ sau khi xóa.
-const getDeletedAccountsCollection = () => collection(getDb(), 'deletedAccounts');
 
 const getFirebaseErrorCode = (error: unknown): string =>
   error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
@@ -362,20 +359,13 @@ export const upsertAuthenticatedFirebaseUser = async (
   }
   const userRef = doc(getUsersCollection(), user.uid);
   let userSnapshot;
-  let deletedSnapshot;
   try {
-    [userSnapshot, deletedSnapshot] = await Promise.all([
-      getDoc(userRef),
-      getDoc(doc(getDeletedAccountsCollection(), user.uid)),
-    ]);
+    userSnapshot = await getDoc(userRef);
   } catch (error) {
     console.error('FIREBASE_AUTHENTICATED_USER_READ_ERROR:', error);
     throw error;
   }
-  if (deletedSnapshot.exists()) {
-    await signOut(getFirebaseAuth());
-    throw new Error('Tài khoản này đã bị Admin xóa. Hãy liên hệ quản trị viên.');
-  }
+  const isAdmin = user.email.toLowerCase() === FIREBASE_ADMIN_EMAIL;
   let account =
     accountOverride ||
     (userSnapshot.exists()
@@ -385,7 +375,7 @@ export const upsertAuthenticatedFirebaseUser = async (
         })()
       : null);
 
-  if (!account && !userSnapshot.exists()) {
+  if (!account && !userSnapshot.exists() && !isAdmin) {
     let legacySnapshot;
     try {
       legacySnapshot = await getDoc(doc(getLegacyProfilesCollection(), user.uid));
@@ -397,9 +387,14 @@ export const upsertAuthenticatedFirebaseUser = async (
       const legacyProfile = profileFromSnapshot(user.uid, legacySnapshot.data());
       if (legacyProfile) account = firebaseProfileToUserAccount(legacyProfile);
     }
+    if (!account) {
+      // Document users/{uid} không tồn tại nghĩa là Admin đã xóa tài khoản:
+      // đăng xuất ngay và không cho phép tạo lại hồ sơ mới.
+      await signOut(getFirebaseAuth());
+      throw new Error('Tài khoản này đã bị quản trị viên xóa khỏi hệ thống.');
+    }
   }
 
-  const isAdmin = user.email.toLowerCase() === FIREBASE_ADMIN_EMAIL;
   const email = user.email.trim().toLowerCase();
   const displayName =
     account?.fullName ||
@@ -605,29 +600,101 @@ export const updateTeacherStudentClassStatus = async (
 
 export const deleteFirebaseUser = async (uid: string, email?: string): Promise<void> => {
   const db = getDb();
+  const normalizedEmail = email ? email.trim().toLowerCase() : '';
+
+  // 1) Dọn sạch hộp thư con (thông báo) của tài khoản trong users/ và userProfiles/
+  for (const parentCollection of ['users', 'userProfiles']) {
+    try {
+      const inboxSnapshot = await getDocs(collection(db, parentCollection, uid, 'inbox'));
+      if (!inboxSnapshot.empty) {
+        const inboxBatch = writeBatch(db);
+        inboxSnapshot.docs.forEach((inboxDoc) => inboxBatch.delete(inboxDoc.ref));
+        await inboxBatch.commit();
+      }
+    } catch (error) {
+      console.error('FIREBASE_USER_INBOX_DELETE_ERROR:', error);
+    }
+  }
+
+  // 2) Xóa hồ sơ cũ (nếu còn) trong collection userProfiles
   try {
-    const inboxSnapshot = await getDocs(collection(db, 'users', uid, 'inbox'));
-    if (!inboxSnapshot.empty) {
-      const inboxBatch = writeBatch(db);
-      inboxSnapshot.docs.forEach((inboxDoc) => inboxBatch.delete(inboxDoc.ref));
-      await inboxBatch.commit();
+    await deleteDoc(doc(getLegacyProfilesCollection(), uid));
+  } catch (error) {
+    console.error('FIREBASE_LEGACY_PROFILE_DELETE_ERROR:', error);
+  }
+
+  // 3) Xóa mọi dữ liệu khác gắn với uid hoặc email (thư hỗ trợ/góp ý...)
+  try {
+    const relatedDocs = [
+      ...(await getDocs(query(collection(db, 'supportTickets'), where('senderUid', '==', uid)))).docs,
+      ...(normalizedEmail
+        ? (await getDocs(query(collection(db, 'supportTickets'), where('senderEmail', '==', normalizedEmail)))).docs
+        : []),
+    ];
+    const uniqueRelatedRefs = Array.from(
+      new Map(relatedDocs.map((relatedDoc) => [relatedDoc.ref.path, relatedDoc.ref])).values()
+    );
+    if (uniqueRelatedRefs.length > 0) {
+      const relatedBatch = writeBatch(db);
+      uniqueRelatedRefs.forEach((relatedRef) => relatedBatch.delete(relatedRef));
+      await relatedBatch.commit();
     }
   } catch (error) {
-    console.error('FIREBASE_USER_INBOX_DELETE_ERROR:', error);
+    console.error('FIREBASE_USER_RELATED_DATA_DELETE_ERROR:', error);
   }
+
+  // 4) Xóa document chính của người dùng trong collection users
   try {
-    await setDoc(
-      doc(getDeletedAccountsCollection(), uid),
-      {
-        uid,
-        email: email ? email.trim().toLowerCase() : null,
-        deletedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
     await deleteDoc(doc(getUsersCollection(), uid));
   } catch (error) {
     console.error('FIREBASE_USER_DELETE_ERROR:', error);
+    throw error;
+  }
+};
+
+/**
+ * Xóa tận gốc tài khoản qua Vercel Serverless Function `/api/delete-user`
+ * (Firebase Authentication + Firestore). Nếu API chưa được triển khai ở môi
+ * trường cục bộ, tự động dọn dữ liệu Firestore phía client.
+ */
+export const deleteUserAccount = async (
+  uid: string,
+  email?: string
+): Promise<'server' | 'client'> => {
+  let idToken = '';
+  try {
+    const currentUser = getFirebaseAuth().currentUser;
+    idToken = currentUser ? await currentUser.getIdToken() : '';
+  } catch (error) {
+    console.error('FIREBASE_ADMIN_ID_TOKEN_ERROR:', error);
+  }
+
+  try {
+    const response = await fetch('/api/delete-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
+      body: JSON.stringify({ uid, email }),
+    });
+
+    if (response.ok) return 'server';
+
+    // 404: backend serverless chưa có (ví dụ khi chạy dev cục bộ).
+    if (response.status === 404) {
+      await deleteFirebaseUser(uid, email);
+      return 'client';
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message || 'Không thể xóa tài khoản trên máy chủ.');
+  } catch (error) {
+    if (error instanceof TypeError) {
+      // Không kết nối được API: dọn dữ liệu Firestore phía client.
+      await deleteFirebaseUser(uid, email);
+      return 'client';
+    }
     throw error;
   }
 };

@@ -97,6 +97,9 @@ export default function App() {
             })
             .catch((error: unknown) => {
               console.error('FIREBASE_USER_PROFILE_RESTORE_ERROR:', error);
+              if (error instanceof Error && error.message.includes('đã bị quản trị viên xóa')) {
+                showToast(`⛔ ${error.message}`);
+              }
               void signOutFirebaseAdmin();
               setFirebaseUid(null);
               setCurrentUser(null);
