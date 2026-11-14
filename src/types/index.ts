@@ -158,6 +158,21 @@ export interface UserNotification {
   read: boolean;
 }
 
+export interface SupportTicket {
+  id: string;
+  senderName: string;
+  senderEmail: string;
+  senderUid?: string;
+  gradeInfo: string;
+  schoolInfo: string;
+  topic: string;
+  issueContent: string;
+  createdAt: number;
+  handled: boolean;
+  handledAt?: number;
+  handledBy?: string;
+}
+
 export interface FirebaseUserProfile {
   uid: string;
   email: string;

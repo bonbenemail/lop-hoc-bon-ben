@@ -5,9 +5,29 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email_verified == true;
     }
 
+    // Admin được xác định bằng email tài khoản quản trị, không phụ thuộc trạng thái
+    // xác minh email của token (tránh việc Admin bị chặn đọc/ghi âm thầm).
     function isAdmin() {
-      return signedIn() &&
+      return request.auth != null &&
         request.auth.token.email == 'bonbenemail@gmail.com';
+    }
+
+    function isValidSupportTicket() {
+      return request.resource.data.keys().hasOnly([
+          'senderName', 'senderEmail', 'senderUid', 'gradeInfo', 'schoolInfo',
+          'topic', 'issueContent', 'createdAt', 'handled'
+        ]) &&
+        request.resource.data.senderName is string &&
+        request.resource.data.senderName.size() > 0 &&
+        request.resource.data.senderName.size() <= 200 &&
+        request.resource.data.senderEmail is string &&
+        request.resource.data.senderEmail.matches('^[A-Za-z0-9._%+-]+@gmail\\.com$') &&
+        request.resource.data.topic is string &&
+        request.resource.data.topic.size() <= 200 &&
+        request.resource.data.issueContent is string &&
+        request.resource.data.issueContent.size() >= 5 &&
+        request.resource.data.issueContent.size() <= 5000 &&
+        request.resource.data.handled == false;
     }
 
     function canCreateOwnUser(uid) {
@@ -110,6 +130,13 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
           request.resource.data.read == true;
       }
+    }
+
+    // Hộp thư hỗ trợ dùng chung: người dùng gửi (kể cả khách) có thể tạo thư,
+    // chỉ Admin đọc/quản lý để đồng bộ trên mọi thiết bị.
+    match /supportTickets/{ticketId} {
+      allow create: if isValidSupportTicket();
+      allow get, list, update, delete: if isAdmin();
     }
   }
 }

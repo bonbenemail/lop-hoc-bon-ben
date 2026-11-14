@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bell, CheckCircle2, Loader2, Send, Users } from 'lucide-react';
 import type { FirebaseUserProfile, NotificationAudienceRole, NotificationDisplayMode } from '../types';
-import { getFirebaseUserProfiles, sendNotifications } from '../services/firebaseNotifications';
+import { sendNotifications, subscribeToFirebaseUsers } from '../services/firebaseNotifications';
 import { FIREBASE_ADMIN_EMAIL } from '../services/firebaseAdminAuth';
 
 type AudienceMode = 'all' | 'role' | 'selected';
@@ -34,32 +34,23 @@ export const AdminNotificationsPanel: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true;
-    getFirebaseUserProfiles()
-      .then((users) => {
-        if (active) {
-          setProfiles(
-            users.filter(
-              (user) =>
-                (user.role === 'student' || user.role === 'teacher' || user.role === 'school') &&
-                !user.disabled
-            )
-          );
-        }
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        console.error('FIREBASE_NOTIFICATION_RECIPIENT_READ_ERROR:', error);
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Không tải được danh sách tài khoản Firebase.'
+    return subscribeToFirebaseUsers(
+      (users) => {
+        setProfiles(
+          users.filter(
+            (user) =>
+              (user.role === 'student' || user.role === 'teacher' || user.role === 'school') &&
+              !user.disabled
+          )
         );
-      })
-      .finally(() => {
-        if (active) setIsLoadingProfiles(false);
-      });
-    return () => {
-      active = false;
-    };
+        setIsLoadingProfiles(false);
+      },
+      (error) => {
+        console.error('FIREBASE_NOTIFICATION_RECIPIENT_READ_ERROR:', error);
+        setErrorMessage(`Không tải được danh sách tài khoản Firebase: ${error.message}`);
+        setIsLoadingProfiles(false);
+      }
+    );
   }, []);
 
   const filteredProfiles = useMemo(() => {

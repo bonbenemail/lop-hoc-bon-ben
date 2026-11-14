@@ -22,7 +22,8 @@ import {
   Building2,
   MapPin,
   Plus,
-  Bell
+  Bell,
+  Inbox
 } from 'lucide-react';
 import {
   GradeLevel,
@@ -51,6 +52,7 @@ import {
 import { GRADE_EXERCISE_TYPES, HERO_IMAGE, MASCOT_IMAGE } from '../data/bonbenData';
 import { VIETNAM_ADMIN_UNITS } from '../data/vietnamAdministrativeUnits';
 import { AdminNotificationsPanel } from './AdminNotificationsPanel';
+import { AdminSupportInbox } from './AdminSupportInbox';
 import {
   createManagedFirebaseProfile,
   firebaseProfileToUserAccount,
@@ -83,7 +85,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onSwitchToLivePageInspect,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'pending-teachers' | 'pending-students' | 'all-accounts' | 'site-editor' | 'create-account' | 'school-directory' | 'notifications'
+    | 'pending-teachers'
+    | 'pending-students'
+    | 'all-accounts'
+    | 'site-editor'
+    | 'create-account'
+    | 'school-directory'
+    | 'notifications'
+    | 'support-inbox'
   >('pending-students');
 
   const [accounts, setAccounts] = useState<UserAccount[]>([]);
@@ -550,8 +559,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     try {
       const firebaseUid = await createManagedFirebaseProfile(account, newAccountPassword);
       const managedAccount = { ...account, id: firebaseUid, firebaseUid };
-      const next = [...accounts, managedAccount];
-      setAccounts(next);
+      setAccounts((previous) =>
+        previous.some((entry) => entry.firebaseUid === firebaseUid)
+          ? previous
+          : [...previous, managedAccount]
+      );
       onAccountsChange();
       setNewAccountName('');
       setNewAccountEmail('');
@@ -925,6 +937,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveTab('support-inbox')}
+          className={`p-3 rounded-2xl text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
+            activeTab === 'support-inbox'
+              ? 'bg-sky-600 text-white shadow-sm'
+              : 'bg-slate-50 text-slate-700 hover:bg-sky-50'
+          }`}
+        >
+          <div className="flex items-center gap-2 text-left">
+            <Inbox className="w-4 h-4 shrink-0" />
+            <span>7. Hộp thư hỗ trợ</span>
+          </div>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900">
+            Firebase
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('site-editor')}
           className={`p-3 rounded-2xl text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
             activeTab === 'site-editor'
@@ -934,7 +964,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         >
           <div className="flex items-center gap-2 text-left">
             <Sliders className="w-4 h-4 shrink-0" />
-            <span>7. Sửa Trực Tiếp Trang Web</span>
+            <span>8. Sửa Trực Tiếp Trang Web</span>
           </div>
           <span
             className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -2031,6 +2061,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       )}
 
       {activeTab === 'notifications' && <AdminNotificationsPanel />}
+
+      {activeTab === 'support-inbox' && <AdminSupportInbox />}
 
       {/* ==================== TAB 7: SỬA TRỰC TIẾP TRANG WEB & NỘI DUNG BÀI LUYỆN ==================== */}
       {activeTab === 'site-editor' && (

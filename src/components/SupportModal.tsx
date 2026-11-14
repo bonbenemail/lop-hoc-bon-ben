@@ -22,6 +22,7 @@ import {
   sendSupportEmailViaGmail
 } from '../services/gmailAuth';
 import { getConfiguredMascotImage } from '../services/schoolManager';
+import { submitSupportTicket } from '../services/firebaseNotifications';
 
 interface SupportModalProps {
   isOpen: boolean;
@@ -114,15 +115,23 @@ export const SupportModal: React.FC<SupportModalProps> = ({
   const executeSendSupportTicket = async () => {
     setIsSending(true);
     setErrorMsg(null);
+    const ticketPayload = {
+      senderName: senderName.trim(),
+      senderEmail: senderEmail.trim().toLowerCase(),
+      senderUid: currentUser?.firebaseUid,
+      gradeInfo: gradeInfo.trim() || `Lớp ${currentGrade}`,
+      schoolInfo: schoolInfo.trim(),
+      topic,
+      issueContent: issueContent.trim(),
+    };
     try {
-      await sendSupportEmailViaGmail({
-        senderName: senderName.trim(),
-        senderEmail: senderEmail.trim().toLowerCase(),
-        gradeInfo: gradeInfo.trim() || `Lớp ${currentGrade}`,
-        schoolInfo: schoolInfo.trim(),
-        topic,
-        issueContent: issueContent.trim(),
-      });
+      // Lưu thư hỗ trợ lên Firebase trước để hộp thư Admin đồng bộ trên mọi thiết bị.
+      try {
+        await submitSupportTicket(ticketPayload);
+      } catch (syncError) {
+        console.error('SUPPORT_TICKET_SYNC_ERROR:', syncError);
+      }
+      await sendSupportEmailViaGmail(ticketPayload);
       setShowConfirmModal(false);
       setSentSuccess(true);
       setIssueContent('');

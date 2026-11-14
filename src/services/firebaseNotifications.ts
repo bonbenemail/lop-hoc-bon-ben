@@ -30,6 +30,7 @@ import {
 import type {
   FirebaseUserProfile,
   NotificationDisplayMode,
+  SupportTicket,
   UserAccount,
   UserNotification,
 } from '../types';
@@ -750,5 +751,98 @@ export const markUserNotificationRead = async (
   await updateDoc(doc(getDb(), 'users', uid, 'inbox', notificationId), {
     read: true,
     readAt: serverTimestamp(),
+  });
+};
+
+const SUPPORT_TICKETS_COLLECTION = 'supportTickets';
+
+const supportTicketFromSnapshot = (
+  id: string,
+  data: Record<string, unknown>
+): SupportTicket | null => {
+  if (
+    typeof data.senderName !== 'string' ||
+    typeof data.senderEmail !== 'string' ||
+    typeof data.issueContent !== 'string'
+  ) {
+    return null;
+  }
+  const createdAtValue = data.createdAt;
+  const createdAt =
+    createdAtValue && typeof createdAtValue === 'object' && 'toMillis' in createdAtValue
+      ? Number((createdAtValue as { toMillis: () => number }).toMillis())
+      : Date.now();
+  const handledAtValue = data.handledAt;
+  return {
+    id,
+    senderName: data.senderName,
+    senderEmail: data.senderEmail,
+    senderUid: typeof data.senderUid === 'string' && data.senderUid ? data.senderUid : undefined,
+    gradeInfo: typeof data.gradeInfo === 'string' ? data.gradeInfo : '',
+    schoolInfo: typeof data.schoolInfo === 'string' ? data.schoolInfo : '',
+    topic: typeof data.topic === 'string' ? data.topic : '',
+    issueContent: data.issueContent,
+    createdAt,
+    handled: data.handled === true,
+    handledAt:
+      handledAtValue && typeof handledAtValue === 'object' && 'toMillis' in handledAtValue
+        ? Number((handledAtValue as { toMillis: () => number }).toMillis())
+        : undefined,
+    handledBy: typeof data.handledBy === 'string' ? data.handledBy : undefined,
+  };
+};
+
+export const submitSupportTicket = async (ticket: {
+  senderName: string;
+  senderEmail: string;
+  senderUid?: string;
+  gradeInfo: string;
+  schoolInfo: string;
+  topic: string;
+  issueContent: string;
+}): Promise<string> => {
+  const ticketRef = doc(collection(getDb(), SUPPORT_TICKETS_COLLECTION));
+  await setDoc(ticketRef, {
+    senderName: ticket.senderName.trim(),
+    senderEmail: ticket.senderEmail.trim().toLowerCase(),
+    senderUid: ticket.senderUid || '',
+    gradeInfo: ticket.gradeInfo.trim(),
+    schoolInfo: ticket.schoolInfo.trim(),
+    topic: ticket.topic.trim(),
+    issueContent: ticket.issueContent.trim(),
+    createdAt: serverTimestamp(),
+    handled: false,
+  });
+  return ticketRef.id;
+};
+
+export const subscribeToSupportTickets = (
+  onTickets: (tickets: SupportTicket[]) => void,
+  onError: (error: Error) => void
+): Unsubscribe =>
+  onSnapshot(
+    query(
+      collection(getDb(), SUPPORT_TICKETS_COLLECTION),
+      orderBy('createdAt', 'desc'),
+      limit(200)
+    ),
+    (snapshot) => {
+      onTickets(
+        snapshot.docs
+          .map((ticketDoc) => supportTicketFromSnapshot(ticketDoc.id, ticketDoc.data()))
+          .filter((ticket): ticket is SupportTicket => ticket !== null)
+      );
+    },
+    (error) => onError(error)
+  );
+
+export const markSupportTicketHandled = async (
+  ticketId: string,
+  handledBy: string
+): Promise<void> => {
+  await updateDoc(doc(getDb(), SUPPORT_TICKETS_COLLECTION, ticketId), {
+    handled: true,
+    handledAt: serverTimestamp(),
+    handledBy,
   });
 };
