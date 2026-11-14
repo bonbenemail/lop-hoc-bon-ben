@@ -1166,6 +1166,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               </span>
                             </div>
                             <div className="text-xs text-sky-700 font-semibold mt-0.5">
+                              🔑 Tên đăng nhập: <strong>{st.username || 'Chưa thiết lập'}</strong>
+                            </div>
+                            <div className="text-xs text-sky-700 font-semibold mt-0.5">
                               📧 {st.email} · 🏫 Trường: <strong>{st.school || 'Chưa cập nhật'}</strong>
                             </div>
                             <div className="text-[11px] mt-1">

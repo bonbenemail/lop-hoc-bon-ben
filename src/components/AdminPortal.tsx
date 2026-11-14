@@ -1064,6 +1064,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         </span>
                       </div>
                       <div className="text-xs text-slate-600 flex flex-wrap gap-3">
+                        <span>🔑 Tên đăng nhập: <strong>{st.username || 'Chưa thiết lập'}</strong></span>
+                        <span>·</span>
                         <span>Gmail: <strong>{st.email}</strong></span>
                         <span>·</span>
                         <span>🏫 Trường: <strong>{st.school || 'Chưa cập nhật'}</strong></span>
@@ -1132,7 +1134,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           Lớp {st.className || `${st.grade}A1`} · {st.school}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">Gmail: {st.email}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        🔑 Tên đăng nhập: <strong>{st.username || 'Chưa thiết lập'}</strong> · Gmail: {st.email}
+                      </p>
                     </div>
 
                     <button
@@ -1205,6 +1209,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         </span>
                       </div>
                       <div className="text-xs text-slate-600 flex flex-wrap gap-3">
+                        <span>🔑 Tên đăng nhập: <strong>{tc.username || 'Chưa thiết lập'}</strong></span>
+                        <span>·</span>
                         <span>Gmail: <strong>{tc.email}</strong></span>
                         <span>·</span>
                         <span>🏫 Trường đang dạy: <strong>{tc.school || 'Chưa cập nhật'}</strong></span>
@@ -1263,7 +1269,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           Lớp đang dạy: {tc.className} · Trường: {tc.school}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">Gmail: {tc.email}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        🔑 Tên đăng nhập: <strong>{tc.username || 'Chưa thiết lập'}</strong> · Gmail: {tc.email}
+                      </p>
                     </div>
 
                     <button
@@ -1378,6 +1386,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         </div>
 
                         <div className="text-xs text-slate-500 flex flex-wrap items-center gap-3">
+                          <span>🔑 Tên đăng nhập: <strong>{acc.username || 'Chưa thiết lập'}</strong></span>
+                          <span>·</span>
                           <span>Gmail: <strong>{acc.email}</strong></span>
                           <span>·</span>
                           <span>UID: <strong className="font-mono">{acc.firebaseUid}</strong></span>
