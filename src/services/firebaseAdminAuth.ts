@@ -14,7 +14,7 @@ import type { GradeLevel, UserAccount } from '../types';
 
 export const FIREBASE_ADMIN_EMAIL = 'bonbenemail@gmail.com';
 
-const ADMIN_APP_NAME = 'bonben-admin-auth';
+const BONBEN_APP_NAME = 'bonben-auth';
 const firebaseConfig: FirebaseOptions = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -41,17 +41,20 @@ export const isAdminFirebaseConfigured = (): boolean =>
 
 let adminAuthInstance: Auth | null = null;
 
-const getAdminAuth = (): Auth => {
+export const getFirebaseApp = () => {
   if (!isAdminFirebaseConfigured()) {
     throw new Error(
       'Thiếu cấu hình Firebase. Hãy thêm đầy đủ các biến VITE_FIREBASE_... vào file .env rồi khởi động lại ứng dụng.'
     );
   }
 
+  return getApps().find((app) => app.name === BONBEN_APP_NAME) ||
+    initializeApp(firebaseConfig, BONBEN_APP_NAME);
+};
+
+export const getFirebaseAuth = (): Auth => {
   if (!adminAuthInstance) {
-    const existingApp = getApps().find((app) => app.name === ADMIN_APP_NAME);
-    const app = existingApp || initializeApp(firebaseConfig, ADMIN_APP_NAME);
-    adminAuthInstance = getAuth(app);
+    adminAuthInstance = getAuth(getFirebaseApp());
   }
 
   return adminAuthInstance;
@@ -62,7 +65,7 @@ export const signInAdminWithFirebase = async (email: string, password: string): 
     throw new Error('Chỉ tài khoản quản trị được phép đăng nhập bằng luồng này.');
   }
 
-  const auth = getAdminAuth();
+  const auth = getFirebaseAuth();
   let credential: UserCredential;
   try {
     credential = await signInWithEmailAndPassword(auth, FIREBASE_ADMIN_EMAIL, password);
@@ -98,21 +101,22 @@ export const signInAdminWithFirebase = async (email: string, password: string): 
 };
 
 export const sendAdminFirebasePasswordReset = async (): Promise<void> => {
-  await sendPasswordResetEmail(getAdminAuth(), FIREBASE_ADMIN_EMAIL);
+  await sendPasswordResetEmail(getFirebaseAuth(), FIREBASE_ADMIN_EMAIL);
 };
 
 export const subscribeToFirebaseAdmin = (callback: (user: User | null) => void): (() => void) => {
   if (!isAdminFirebaseConfigured()) return () => undefined;
-  return onAuthStateChanged(getAdminAuth(), callback);
+  return onAuthStateChanged(getFirebaseAuth(), callback);
 };
 
 export const signOutFirebaseAdmin = async (): Promise<void> => {
   if (!isAdminFirebaseConfigured()) return;
-  await signOut(getAdminAuth());
+  await signOut(getFirebaseAuth());
 };
 
 export const createFirebaseAdminAccount = (user: User, grade: GradeLevel): UserAccount => ({
   id: user.uid,
+  firebaseUid: user.uid,
   fullName: user.displayName || 'Quản Trị Hệ Thống Bon Ben',
   email: FIREBASE_ADMIN_EMAIL,
   verifiedByGmail: user.emailVerified,

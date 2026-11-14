@@ -32,8 +32,7 @@ import {
   initAuth,
   googleSignIn,
   logoutGmail,
-  sendVerificationOtpViaGmail,
-  sendPasswordResetOtpViaGmail
+  sendVerificationOtpViaGmail
 } from '../services/gmailAuth';
 import {
   createFirebaseAdminAccount,
@@ -41,6 +40,14 @@ import {
   sendAdminFirebasePasswordReset,
   signInAdminWithFirebase
 } from '../services/firebaseAdminAuth';
+import {
+  firebaseProfileToUserAccount,
+  getFirebaseUserProfile,
+  registerFirebaseUser,
+  saveOwnFirebaseProfile,
+  sendFirebaseUserPasswordReset,
+  signInFirebaseUser,
+} from '../services/firebaseNotifications';
 import {
   getAllRegisteredAccounts,
   saveAllRegisteredAccounts,
@@ -327,18 +334,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Gửi mã 6 số khôi phục mật khẩu qua Gmail thật cho tài khoản quên mật khẩu
+  // Firebase sends the password reset link and applies the new password to Auth.
   const executeSendForgotRequest = async () => {
     setIsSendingEmail(true);
     setErrors({});
     const cleanEmail = forgotEmail.trim().toLowerCase();
-    const registeredAccounts = getRegisteredGmailAccounts();
-    const matchedAccount = registeredAccounts.find(
-      (acc) => acc.email.toLowerCase() === cleanEmail
-    );
-    const targetName =
-      matchedAccount?.fullName ||
-      (cleanEmail === ADMIN_GMAIL ? 'Quản Trị Hệ Thống Bon Ben' : cleanEmail);
 
     if (cleanEmail === ADMIN_GMAIL) {
       try {
@@ -365,29 +365,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
     try {
-      await sendPasswordResetOtpViaGmail({
-        toEmail: cleanEmail,
-        studentName: targetName,
-        otpCode: code,
-      });
-      setGeneratedOtp(code);
-      setOtpDigits(['', '', '', '', '', '']);
-      setResendTimer(60);
+      await sendFirebaseUserPasswordReset(cleanEmail);
       setShowForgotConfirmModal(false);
-      setForgotStep('verify-otp');
-      setOtpSentNotice(
-        `Đã gửi mã khôi phục mật khẩu 6 số tới hộp thư ${cleanEmail}`
+      setSuccessMessage(
+        `Firebase đã gửi liên kết đặt lại mật khẩu tới ${cleanEmail}. Hãy dùng liên kết đó rồi đăng nhập lại.`
       );
       setTimeout(() => {
-        otpInputRefs.current[0]?.focus();
-      }, 120);
+        setSuccessMessage(null);
+        setAuthMode('login');
+        setForgotStep('request');
+      }, 4000);
     } catch (err: unknown) {
       const msg =
         err instanceof Error
           ? err.message
-          : 'Không thể gửi email mã khôi phục. Vui lòng kiểm tra cấu hình máy chủ gửi email.';
+          : 'Không thể gửi liên kết khôi phục Firebase.';
       setErrors({ gmail: msg });
     } finally {
       setIsSendingEmail(false);
@@ -408,18 +401,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (!validateEmail(cleanEmail)) {
       setErrors({
         forgotEmail: 'Chỉ chấp nhận địa chỉ Gmail hợp lệ có đuôi @gmail.com.',
-      });
-      return;
-    }
-
-    const registeredAccounts = getRegisteredGmailAccounts();
-    const matchedAccount = registeredAccounts.find(
-      (acc) => acc.email.toLowerCase() === cleanEmail
-    );
-
-    if (!matchedAccount && cleanEmail !== ADMIN_GMAIL) {
-      setErrors({
-        forgotEmail: `Tài khoản Gmail "${cleanEmail}" chưa được đăng ký trên hệ thống! Chỉ tài khoản Gmail đã đăng ký mới có thể nhận mã 6 số để khôi phục mật khẩu.`,
       });
       return;
     }
@@ -497,7 +478,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   // Chỉ được gọi SAU KHI người dùng đã nhập đúng mã 6 số gửi về Gmail khi Tạo tài khoản
-  const completeRegistrationAfterGmailOtp = () => {
+  const completeRegistrationAfterGmailOtp = async () => {
     const cleanEmail = email.trim().toLowerCase();
     if (cleanEmail === ADMIN_GMAIL) {
       setErrors({
@@ -589,27 +570,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       createdAt: new Date().toISOString(),
     };
 
+    try {
+      await registerFirebaseUser(cleanEmail, password, newAccount);
+    } catch (error: unknown) {
+      const code =
+        error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      setErrors({
+        otp:
+          code === 'auth/email-already-in-use'
+            ? 'Gmail này đã có tài khoản Firebase. Hãy chuyển sang Đăng nhập hoặc dùng chức năng khôi phục mật khẩu.'
+            : error instanceof Error
+              ? error.message
+              : 'Không thể tạo tài khoản Firebase. Vui lòng thử lại.',
+      });
+      return;
+    }
+
     const updatedAccounts = [...existingAccounts, newAccount];
     saveAllRegisteredAccounts(updatedAccounts);
-    const syncedAccounts = getAllRegisteredAccounts();
-    const syncedNewAccount =
-      syncedAccounts.find((a) => a.email.toLowerCase() === cleanEmail) || newAccount;
     refreshRegisteredStudents();
-
-    onSelectGrade(selectedGrade);
-    onLogin(syncedNewAccount);
 
     if (finalRole === 'teacher') {
       setSuccessMessage(
-        `Đăng ký tài khoản Giáo viên thành công (${syncedNewAccount.fullName} · Dạy Lớp ${cleanClass} - ${cleanSchool}). Tài khoản đang chờ Admin xét duyệt!`
+        `Tài khoản Giáo viên đã tạo (${newAccount.fullName} · Dạy Lớp ${cleanClass} - ${cleanSchool}) và đang chờ Admin xét duyệt. Hãy xác minh địa chỉ email bằng liên kết Firebase vừa gửi rồi đăng nhập.`
       );
     } else if (matchedTeacher) {
       setSuccessMessage(
-        `Tạo tài khoản Học sinh thành công! Bạn đã được ghi nhận trùng Lớp ${cleanClass} (${cleanSchool}) với Giáo viên ${matchedTeacher.fullName} — đang đợi Giáo viên cho vào lớp & chờ Admin duyệt mở khóa toàn bộ bài luyện.`
+        `Tài khoản đã tạo và được ghi nhận trùng Lớp ${cleanClass} (${cleanSchool}) với Giáo viên ${matchedTeacher.fullName}. Hãy xác minh email bằng liên kết Firebase vừa gửi rồi đăng nhập.`
       );
     } else {
       setSuccessMessage(
-        `Tạo tài khoản Học sinh thành công (${syncedNewAccount.fullName} · Lớp ${cleanClass} · ${cleanSchool})! Hiện tại bạn có thể làm thử 3 bài đầu tiên trong khi chờ Admin duyệt mở khóa toàn bộ bài luyện.`
+        `Tài khoản đã tạo (${newAccount.fullName} · Lớp ${cleanClass} · ${cleanSchool}). Hãy xác minh email bằng liên kết Firebase vừa gửi rồi đăng nhập để mở hộp thư thông báo.`
       );
     }
 
@@ -617,7 +608,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setSuccessMessage(null);
       setRegisterStep('form');
       onClose();
-    }, 1500);
+    }, 6500);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -708,42 +699,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Kiểm tra tài khoản đã đăng ký bằng Gmail
-    if (!matchedAccount || matchedAccount.verifiedByGmail !== true) {
-      setErrors({
-        login: `Tài khoản Gmail "${cleanEmail}" chưa từng được đăng ký! Chỉ tài khoản đã đăng ký và xác thực mã 6 số qua Gmail mới được phép đăng nhập. Vui lòng chuyển sang mục "Tạo tài khoản mới" để đăng ký trước.`,
-        email: 'Gmail này chưa được đăng ký tài khoản trên hệ thống.',
-      });
-      return;
-    }
-
-    if (matchedAccount.password !== password) {
-      setErrors({
-        login:
-          'Mật khẩu không chính xác. Vui lòng nhập đúng mật khẩu của tài khoản Gmail này.',
-        password: 'Mật khẩu không chính xác.',
-      });
-      return;
-    }
-
-    // Đăng nhập thành công với đúng tài khoản đã đăng ký bằng Gmail
-    setErrors({});
-    onSelectGrade(matchedAccount.grade);
-    onLogin(matchedAccount);
-
-    setSuccessMessage(
-      `Đăng nhập thành công! Chào mừng ${matchedAccount.fullName} (Lớp ${matchedAccount.className || matchedAccount.grade} · ${matchedAccount.school || 'Lớp học Bon Ben'}).`
-    );
-
-    setTimeout(() => {
-      setSuccessMessage(null);
-      setRegisterStep('form');
-      onClose();
-      const exSection = document.getElementById('exercise-types');
-      if (exSection) {
-        exSection.scrollIntoView({ behavior: 'smooth' });
+    setIsAdminSigningIn(true);
+    try {
+      let firebaseUser;
+      try {
+        firebaseUser = await signInFirebaseUser(cleanEmail, password);
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          error.message === 'FIREBASE_USER_NOT_FOUND' &&
+          matchedAccount?.verifiedByGmail === true
+        ) {
+          await registerFirebaseUser(cleanEmail, password, matchedAccount);
+          setSuccessMessage(
+            'Tài khoản cũ đã được chuyển sang xác thực Firebase. Hãy xác minh địa chỉ email bằng liên kết vừa gửi rồi đăng nhập lại.'
+          );
+          setTimeout(() => {
+            setSuccessMessage(null);
+            onClose();
+          }, 6500);
+          return;
+        }
+        if (error instanceof Error && error.message === 'FIREBASE_USER_NOT_FOUND') {
+          setErrors({
+            login:
+              'Tài khoản này chưa được tạo trong Firebase. Hãy đăng ký bằng Gmail hoặc liên hệ Admin nếu đây là tài khoản do trường cấp.',
+            email: 'Không tìm thấy tài khoản Firebase.',
+          });
+          return;
+        }
+        throw error;
       }
-    }, 1200);
+
+      const profile = await getFirebaseUserProfile(firebaseUser.uid);
+      let account: UserAccount;
+      if (profile) {
+        account = firebaseProfileToUserAccount(profile);
+        if (matchedAccount) {
+          account = {
+            ...matchedAccount,
+            ...account,
+            firebaseUid: firebaseUser.uid,
+            password: matchedAccount.password,
+          };
+        }
+      } else if (matchedAccount?.verifiedByGmail === true) {
+        const savedProfile = await saveOwnFirebaseProfile(firebaseUser, matchedAccount);
+        account = {
+          ...firebaseProfileToUserAccount(savedProfile),
+          password: matchedAccount.password,
+        };
+      } else {
+        throw new Error(
+          'Tài khoản Firebase chưa có hồ sơ Bon Ben dùng chung. Nếu đây là tài khoản cũ, hãy đăng nhập một lần trên thiết bị còn lưu hồ sơ cũ để đồng bộ; nếu không, hãy liên hệ Admin.'
+        );
+      }
+
+      setErrors({});
+      onSelectGrade(account.grade);
+      onLogin(account);
+      setSuccessMessage(
+        `Đăng nhập thành công! Chào mừng ${account.fullName} (Lớp ${account.className || account.grade} · ${account.school || 'Lớp học Bon Ben'}).`
+      );
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+        setRegisterStep('form');
+        onClose();
+        const exSection = document.getElementById('exercise-types');
+        if (exSection) {
+          exSection.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 1200);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Đăng nhập Firebase thất bại.';
+      setErrors({ login: message, password: message });
+    } finally {
+      setIsAdminSigningIn(false);
+    }
   };
 
   // Lưu thay đổi Lớp & Trường học sau khi đã đăng ký/đăng nhập
@@ -868,7 +901,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
     setErrors({});
-    completeRegistrationAfterGmailOtp();
+    setIsAdminSigningIn(true);
+    void completeRegistrationAfterGmailOtp().finally(() => setIsAdminSigningIn(false));
   };
 
   const handleOtpDigitChange = (index: number, value: string) => {
@@ -955,8 +989,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   ? 'Đăng Nhập Tài Khoản'
                   : authMode === 'forgot-password'
                   ? forgotStep === 'verify-otp'
-                    ? 'Nhập Mã 6 Số Từ Gmail & Đặt Mật Khẩu Mới'
-                    : 'Quên Mật Khẩu · Nhận Mã 6 Số Qua Gmail'
+                    ? 'Đặt Lại Mật Khẩu Bằng Firebase'
+                    : 'Quên Mật Khẩu · Nhận Liên Kết Firebase'
                   : authMode === 'admin'
                   ? 'Quản Lý Toàn Bộ Hệ Thống & Tài Khoản Đã Đăng Ký'
                   : 'Hồ Sơ Tài Khoản · Đổi Lớp & Trường'}
@@ -2336,7 +2370,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {isAdminSigningIn ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Đang xác thực Admin với Firebase...</span>
+                        <span>Đang xác thực tài khoản với Firebase...</span>
                       </>
                     ) : (
                       <>
@@ -2400,12 +2434,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <h4 className="text-xs sm:text-sm font-extrabold text-slate-900">
                     {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
                       ? 'Đặt lại mật khẩu Admin qua Firebase'
-                      : 'Khôi phục mật khẩu bằng mã 6 số gửi về Gmail thật'}
+                      : 'Khôi phục mật khẩu bằng liên kết Firebase gửi về Gmail'}
                   </h4>
                   <p className="text-xs text-slate-600 leading-relaxed">
                     {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
                       ? 'Firebase sẽ gửi liên kết đặt lại mật khẩu tới hộp thư Admin đã đăng ký trong Firebase Authentication.'
-                      : 'Nhập địa chỉ Gmail (@gmail.com) đã đăng ký tài khoản trên Lớp học Bon Ben. Hệ thống sẽ gửi mã xác thực 6 chữ số trực tiếp vào hộp thư để đổi mật khẩu.'}
+                      : 'Nhập địa chỉ Gmail (@gmail.com) đã đăng ký tài khoản trên Lớp học Bon Ben. Firebase sẽ gửi liên kết đặt lại mật khẩu tới hộp thư của bạn.'}
                   </p>
                 </div>
               </div>
@@ -2418,7 +2452,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span className="text-[10px] text-amber-700 font-bold">
                     {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
                       ? 'Liên kết do Firebase gửi'
-                      : 'Chỉ Gmail đã đăng ký mới nhận được mã'}
+                      : 'Liên kết đặt lại mật khẩu'}
                   </span>
                 </div>
                 <div className="relative">
@@ -2464,7 +2498,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   className="w-full flex-1 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Gửi mã 6 số khôi phục về hộp thư Gmail</span>
+                  <span>Gửi liên kết đặt lại mật khẩu</span>
                 </button>
               </div>
             </form>

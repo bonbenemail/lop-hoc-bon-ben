@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        request.auth.token.email == 'bonbenemail@gmail.com';
+    }
+
+    function canCreateOwnProfile(uid) {
+      return request.auth != null &&
+        request.auth.uid == uid &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.role in ['student', 'teacher'] &&
+        request.resource.data.fullName is string &&
+        request.resource.data.grade is int &&
+        request.resource.data.grade >= 1 &&
+        request.resource.data.grade <= 12 &&
+        request.resource.data.keys().hasOnly([
+          'email', 'fullName', 'role', 'grade', 'className', 'school',
+          'schoolLevel', 'provinceOrCity', 'district', 'studentCode',
+          'canPracticeAll', 'practiceApprovalStatus', 'teacherApprovalStatus',
+          'createdAt'
+        ]) &&
+        (
+          (request.resource.data.role == 'student' &&
+            request.resource.data.canPracticeAll == false &&
+            request.resource.data.practiceApprovalStatus == 'pending') ||
+          (request.resource.data.role == 'teacher' &&
+            request.resource.data.canPracticeAll == true &&
+            request.resource.data.practiceApprovalStatus == 'approved' &&
+            request.resource.data.teacherApprovalStatus == 'pending')
+        );
+    }
+
+    match /userProfiles/{uid} {
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        canCreateOwnProfile(uid);
+      allow update, delete: if isAdmin();
+
+      match /inbox/{notificationId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow create, delete: if isAdmin();
+        allow update: if signedIn() &&
+          request.auth.uid == uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
+          request.resource.data.read == true;
+      }
+    }
+  }
+}

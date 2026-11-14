@@ -23,7 +23,8 @@ import {
   Sliders,
   Building2,
   MapPin,
-  Plus
+  Plus,
+  Bell
 } from 'lucide-react';
 import {
   GradeLevel,
@@ -36,8 +37,6 @@ import {
 import {
   getAllRegisteredAccounts,
   saveAllRegisteredAccounts,
-  adminUpdateTeacherApproval,
-  adminUpdateStudentPracticePermission,
   getSiteConfig,
   saveSiteConfig,
   resetSiteConfig,
@@ -55,6 +54,13 @@ import {
 } from '../data/practiceLessonsData';
 import { GRADE_EXERCISE_TYPES, HERO_IMAGE, MASCOT_IMAGE } from '../data/bonbenData';
 import { VIETNAM_ADMIN_UNITS } from '../data/vietnamAdministrativeUnits';
+import { AdminNotificationsPanel } from './AdminNotificationsPanel';
+import {
+  createManagedFirebaseProfile,
+  firebaseProfileToUserAccount,
+  getFirebaseUserProfiles,
+  saveManagedFirebaseProfile,
+} from '../services/firebaseNotifications';
 
 const isValidImageUrl = (value: string): boolean => {
   const trimmed = value.trim();
@@ -79,7 +85,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onSwitchToLivePageInspect,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'pending-teachers' | 'pending-students' | 'all-accounts' | 'site-editor' | 'create-account' | 'school-directory'
+    'pending-teachers' | 'pending-students' | 'all-accounts' | 'site-editor' | 'create-account' | 'school-directory' | 'notifications'
   >('pending-students');
 
   const [accounts, setAccounts] = useState<UserAccount[]>([]);
@@ -104,6 +110,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'student' | 'teacher' | 'school'>('all');
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+  const [isBannerError, setIsBannerError] = useState(false);
+  const [isCreatingManagedAccount, setIsCreatingManagedAccount] = useState(false);
 
   const newAccountSchools = schoolDirectory.filter(
     (school) =>
@@ -153,18 +161,65 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editLessonDiff, setEditLessonDiff] = useState<'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao'>('Cơ bản');
   const [editLessonQuestions, setEditLessonQuestions] = useState<QuizQuestion[]>([]);
 
-  const reloadAccounts = () => {
-    setAccounts(getAllRegisteredAccounts());
-  };
-
-  useEffect(() => {
-    reloadAccounts();
-  }, []);
-
-  const notify = (msg: string) => {
+  const notify = (msg: string, isError = false) => {
+    setIsBannerError(isError);
     setBannerMsg(msg);
     setTimeout(() => setBannerMsg(null), 4000);
   };
+
+  const reloadAccounts = async () => {
+    const localAccounts = getAllRegisteredAccounts();
+    setAccounts(localAccounts);
+    try {
+      const profiles = await getFirebaseUserProfiles();
+      const accountsByEmail = new Map(
+        localAccounts.map((account) => [account.email.toLowerCase(), account])
+      );
+      profiles.forEach((profile) => {
+        const cloudAccount = firebaseProfileToUserAccount(profile);
+        const localAccount = accountsByEmail.get(cloudAccount.email.toLowerCase());
+        accountsByEmail.set(cloudAccount.email.toLowerCase(), {
+          ...localAccount,
+          ...cloudAccount,
+          password: localAccount?.password,
+          diamonds: localAccount?.diamonds ?? cloudAccount.diamonds,
+          level: localAccount?.level ?? cloudAccount.level,
+          selectedExerciseTypes:
+            localAccount?.selectedExerciseTypes ?? cloudAccount.selectedExerciseTypes,
+        });
+      });
+      setAccounts(Array.from(accountsByEmail.values()));
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_ACCOUNT_LIST_ERROR:', error);
+      notify(
+        `⚠️ Không tải được danh sách tài khoản dùng chung từ Firebase. ${
+          error instanceof Error ? error.message : 'Hãy kiểm tra quyền truy cập và kết nối.'
+        }`,
+        true
+      );
+    }
+  };
+
+  const syncManagedProfile = async (account: UserAccount | undefined): Promise<boolean> => {
+    if (!account?.firebaseUid) return true;
+    try {
+      await saveManagedFirebaseProfile(account);
+      return true;
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify(
+        `⚠️ Đã lưu thay đổi trên thiết bị này nhưng chưa đồng bộ được Firebase. ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    void reloadAccounts();
+  }, []);
 
   // Phân loại Giáo viên & Học sinh rõ ràng
   const allTeachers = accounts.filter((a) => a.role === 'teacher');
@@ -176,8 +231,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const allowedStudents = allStudents.filter((s) => s.canPracticeAll === true);
 
   // Xử lý duyệt Giáo viên
-  const handleTeacherDecision = (email: string, status: 'approved' | 'pending' | 'rejected') => {
-    const next = adminUpdateTeacherApproval(email, status);
+  const handleTeacherDecision = async (email: string, status: 'approved' | 'pending' | 'rejected') => {
+    const target = accounts.find((account) => account.email.toLowerCase() === email.toLowerCase());
+    if (!target || target.role !== 'teacher') {
+      notify('⚠️ Không tìm thấy tài khoản Giáo viên cần cập nhật.', true);
+      return;
+    }
+    const next = accounts.map((account) =>
+      account.email.toLowerCase() === email.toLowerCase()
+        ? { ...account, teacherApprovalStatus: status }
+        : account
+    );
+    if (!(await syncManagedProfile(next.find((account) => account.email.toLowerCase() === email.toLowerCase())))) {
+      return;
+    }
+    saveAllRegisteredAccounts(next);
     setAccounts(next);
     onAccountsChange();
     notify(
@@ -187,19 +255,44 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     );
   };
 
-  const handleApproveAllPendingTeachers = () => {
+  const handleApproveAllPendingTeachers = async () => {
     const updated = accounts.map((acc): UserAccount =>
       acc.role === 'teacher' ? { ...acc, teacherApprovalStatus: 'approved' as const } : acc
     );
+    const profiles = updated.filter((account) => account.role === 'teacher' && account.firebaseUid);
+    try {
+      await Promise.all(profiles.map(saveManagedFirebaseProfile));
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify('⚠️ Không thể đồng bộ trạng thái duyệt giáo viên lên Firebase. Hãy thử lại.', true);
+      return;
+    }
     saveAllRegisteredAccounts(updated);
-    reloadAccounts();
+    setAccounts(updated);
     onAccountsChange();
     notify('✅ Đã duyệt toàn bộ tài khoản Giáo viên đang chờ!');
   };
 
   // Xử lý cho phép / không cho phép Học sinh làm bài
-  const handleStudentPermission = (email: string, allowAll: boolean) => {
-    const next = adminUpdateStudentPracticePermission(email, allowAll);
+  const handleStudentPermission = async (email: string, allowAll: boolean) => {
+    const target = accounts.find((account) => account.email.toLowerCase() === email.toLowerCase());
+    if (!target || target.role !== 'student') {
+      notify('⚠️ Không tìm thấy tài khoản Học sinh cần cập nhật.', true);
+      return;
+    }
+    const next = accounts.map((account) =>
+      account.email.toLowerCase() === email.toLowerCase()
+        ? {
+            ...account,
+            canPracticeAll: allowAll,
+            practiceApprovalStatus: allowAll ? 'approved' as const : 'blocked' as const,
+          }
+        : account
+    );
+    if (!(await syncManagedProfile(next.find((account) => account.email.toLowerCase() === email.toLowerCase())))) {
+      return;
+    }
+    saveAllRegisteredAccounts(next);
     setAccounts(next);
     onAccountsChange();
     notify(
@@ -209,14 +302,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     );
   };
 
-  const handleApproveAllPendingStudents = () => {
+  const handleApproveAllPendingStudents = async () => {
     const updated = accounts.map((acc) =>
       acc.role === 'student'
         ? { ...acc, canPracticeAll: true, practiceApprovalStatus: 'approved' as const }
         : acc
     );
+    const profiles = updated.filter((account) => account.role === 'student' && account.firebaseUid);
+    try {
+      await Promise.all(profiles.map(saveManagedFirebaseProfile));
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify('⚠️ Không thể đồng bộ trạng thái duyệt học sinh lên Firebase. Hãy thử lại.', true);
+      return;
+    }
     saveAllRegisteredAccounts(updated);
-    reloadAccounts();
+    setAccounts(updated);
     onAccountsChange();
     notify('✅ Đã cho phép toàn bộ học sinh làm tất cả bài luyện và bài thi!');
   };
@@ -241,7 +342,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // Sửa Lớp & Trường
-  const handleSaveAccountInfo = (targetEmail: string) => {
+  const handleSaveAccountInfo = async (targetEmail: string) => {
     const targetAccount = accounts.find(
       (acc) => acc.email.toLowerCase() === targetEmail.toLowerCase()
     );
@@ -309,8 +410,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           }
         : acc
     );
+    if (!(await syncManagedProfile(updated.find((account) => account.email.toLowerCase() === targetEmail.toLowerCase())))) {
+      return;
+    }
     saveAllRegisteredAccounts(updated);
-    reloadAccounts();
+    setAccounts(updated);
     setEditingInfoEmail(null);
     onAccountsChange();
     notify('✅ Đã cập nhật hồ sơ và thông tin trường cho tài khoản!');
@@ -382,7 +486,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     notify('Đã xóa trường khỏi danh mục lựa chọn.');
   };
 
-  const handleCreateManagedAccount = (event: React.FormEvent) => {
+  const handleCreateManagedAccount = async (event: React.FormEvent) => {
     event.preventDefault();
     const email = newAccountEmail.trim().toLowerCase();
     if (
@@ -390,25 +494,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       !/^[a-zA-Z0-9._%+-]+@gmail\.com$/i.test(email) ||
       (newAccountRole !== 'school' && !newAccountClass.trim())
     ) {
-      notify('⚠️ Nhập họ tên, Gmail hợp lệ và khối/lớp nếu tạo tài khoản học sinh hoặc giáo viên.');
+      notify('⚠️ Nhập họ tên, Gmail hợp lệ và khối/lớp nếu tạo tài khoản học sinh hoặc giáo viên.', true);
       return;
     }
     if (email === ADMIN_GMAIL_INTERNAL) {
-      notify('⚠️ Email Admin được dành riêng cho tài khoản Firebase, không thể tạo tài khoản cục bộ.');
+      notify('⚠️ Email Admin được dành riêng cho tài khoản Firebase, không thể tạo tài khoản cục bộ.', true);
       return;
     }
     if (newAccountPassword.length <= 6) {
-      notify('⚠️ Mật khẩu phải có ít nhất 7 ký tự.');
+      notify('⚠️ Mật khẩu phải có ít nhất 7 ký tự.', true);
       return;
     }
     if (accounts.some((account) => account.email.toLowerCase() === email)) {
-      notify('⚠️ Gmail này đã có tài khoản.');
+      notify('⚠️ Gmail này đã có tài khoản.', true);
       return;
     }
 
     const province = VIETNAM_ADMIN_UNITS.find((entry) => entry.name === newAccountProvince);
     if (!province || !province.wards.some((ward) => ward.name === newAccountDistrict)) {
-      notify('⚠️ Hãy chọn tỉnh/thành và phường/xã hợp lệ.');
+      notify('⚠️ Hãy chọn tỉnh/thành và phường/xã hợp lệ.', true);
       return;
     }
     const school = newAccountManualSchoolMode
@@ -421,7 +525,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify(
         newAccountManualSchoolMode
           ? '⚠️ Nhập tên trường cần tạo tài khoản.'
-          : '⚠️ Hãy chọn trường trong danh mục hoặc chuyển sang nhập tên thủ công.'
+          : '⚠️ Hãy chọn trường trong danh mục hoặc chuyển sang nhập tên thủ công.',
+        true
       );
       return;
     }
@@ -466,19 +571,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    const next = [...accounts, account];
-    saveAllRegisteredAccounts(next);
-    setAccounts(getAllRegisteredAccounts());
-    onAccountsChange();
-    setNewAccountName('');
-    setNewAccountEmail('');
-    setNewAccountPassword('');
-    setNewAccountProvince('');
-    setNewAccountDistrict('');
-    setNewAccountSchoolId('');
-    setNewAccountManualSchoolName('');
-    setIsNewAccountManualSchool(false);
-    notify(`✅ Đã tạo tài khoản ${newAccountRole === 'school' ? 'nhà trường' : newAccountRole === 'teacher' ? 'giáo viên' : 'học sinh'}.`);
+    setIsCreatingManagedAccount(true);
+    try {
+      const firebaseUid = await createManagedFirebaseProfile(account);
+      const managedAccount = { ...account, id: firebaseUid, firebaseUid };
+      const next = [...accounts, managedAccount];
+      saveAllRegisteredAccounts(next);
+      setAccounts(next);
+      onAccountsChange();
+      setNewAccountName('');
+      setNewAccountEmail('');
+      setNewAccountPassword('');
+      setNewAccountProvince('');
+      setNewAccountDistrict('');
+      setNewAccountSchoolId('');
+      setNewAccountManualSchoolName('');
+      setIsNewAccountManualSchool(false);
+      notify(`✅ Đã tạo tài khoản ${newAccountRole === 'school' ? 'nhà trường' : newAccountRole === 'teacher' ? 'giáo viên' : 'học sinh'} trong Firebase. Đã gửi liên kết xác minh email.`);
+    } catch (error: unknown) {
+      const message =
+        error && typeof error === 'object' && 'code' in error &&
+        String(error.code) === 'auth/email-already-in-use'
+          ? 'Gmail này đã tồn tại trong Firebase Authentication.'
+          : error instanceof Error
+            ? error.message
+            : 'Không tạo được tài khoản Firebase.';
+      notify(`⚠️ Không tạo được tài khoản: ${message}`, true);
+    } finally {
+      setIsCreatingManagedAccount(false);
+    }
   };
 
   // Xóa tài khoản
@@ -670,8 +791,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       </div>
 
       {bannerMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm font-bold text-emerald-800 flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+        <div
+          role={isBannerError ? 'alert' : 'status'}
+          aria-live="polite"
+          className={`p-4 rounded-2xl border text-xs sm:text-sm font-bold flex items-center gap-2 animate-in fade-in ${
+            isBannerError
+              ? 'bg-red-50 border-red-200 text-red-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}
+        >
+          {isBannerError ? (
+            <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          )}
           <span>{bannerMsg}</span>
         </div>
       )}
@@ -788,6 +921,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveTab('notifications')}
+          className={`p-3 rounded-2xl text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
+            activeTab === 'notifications'
+              ? 'bg-sky-600 text-white shadow-sm'
+              : 'bg-slate-50 text-slate-700 hover:bg-sky-50'
+          }`}
+        >
+          <div className="flex items-center gap-2 text-left">
+            <Bell className="w-4 h-4 shrink-0" />
+            <span>6. Thông báo & Hộp thư</span>
+          </div>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900">
+            Firebase
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('site-editor')}
           className={`p-3 rounded-2xl text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
             activeTab === 'site-editor'
@@ -797,7 +948,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         >
           <div className="flex items-center gap-2 text-left">
             <Sliders className="w-4 h-4 shrink-0" />
-            <span>6. Sửa Trực Tiếp Trang Web</span>
+            <span>7. Sửa Trực Tiếp Trang Web</span>
           </div>
           <span
             className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -1593,6 +1744,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       {activeTab === 'create-account' && (
         <form
           onSubmit={handleCreateManagedAccount}
+          onInvalidCapture={() =>
+            notify('⚠️ Hoàn tất các trường bắt buộc và chọn khu vực/trường trước khi tạo tài khoản.', true)
+          }
           className="bg-white rounded-3xl border border-sky-200 p-5 sm:p-6 shadow-xs space-y-4 animate-in fade-in"
         >
           <div>
@@ -1601,7 +1755,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               Tài khoản Nhà trường chỉ được tạo tại đây, không xuất hiện trong biểu mẫu đăng ký công khai.
             </p>
             <p className="text-[11px] text-amber-800 mt-2">
-              Lưu ý: tài khoản hiện lưu trên trình duyệt này; chưa đồng bộ sang website/người dùng khác.
+              Tài khoản được lưu trên Firebase để đăng nhập trên các thiết bị; người dùng cần xác minh email trước khi đăng nhập.
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1794,9 +1948,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
           <button
             type="submit"
+            disabled={isCreatingManagedAccount}
             className="px-5 py-3 rounded-xl bg-sky-600 disabled:bg-slate-300 text-white text-xs font-extrabold"
           >
-            Tạo tài khoản
+            {isCreatingManagedAccount ? 'Đang tạo tài khoản...' : 'Tạo tài khoản'}
           </button>
         </form>
       )}
@@ -1923,7 +2078,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
       )}
 
-      {/* ==================== TAB 6: SỬA TRỰC TIẾP TRANG WEB & NỘI DUNG BÀI LUYỆN ==================== */}
+      {activeTab === 'notifications' && <AdminNotificationsPanel />}
+
+      {/* ==================== TAB 7: SỬA TRỰC TIẾP TRANG WEB & NỘI DUNG BÀI LUYỆN ==================== */}
       {activeTab === 'site-editor' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
           {/* Cột trái: Sửa trực tiếp văn bản & giao diện trang web */}

@@ -100,6 +100,7 @@ export interface ExerciseType {
 
 export interface UserAccount {
   id: string;
+  firebaseUid?: string;
   fullName: string;
   email: string;
   phone?: string;
@@ -141,6 +142,39 @@ export interface UserAccount {
   avatar?: string;
   selectedExerciseTypes?: string[];
   createdAt: string;
+}
+
+export type NotificationAudienceRole = 'student' | 'teacher' | 'school';
+export type NotificationDisplayMode = 'prominent' | 'inbox';
+
+export interface UserNotification {
+  id: string;
+  title: string;
+  message: string;
+  displayMode: NotificationDisplayMode;
+  recipientUid: string;
+  recipientEmail: string;
+  createdBy: string;
+  createdAt: number;
+  read: boolean;
+}
+
+export interface FirebaseUserProfile {
+  uid: string;
+  email: string;
+  fullName: string;
+  role: NotificationAudienceRole;
+  grade: GradeLevel;
+  className?: string;
+  school?: string;
+  schoolLevel?: 'elementary' | 'lower-secondary' | 'upper-secondary';
+  provinceOrCity?: string;
+  district?: string;
+  studentCode?: string;
+  canPracticeAll?: boolean;
+  practiceApprovalStatus?: 'pending' | 'approved' | 'blocked';
+  teacherApprovalStatus?: 'pending' | 'approved' | 'rejected';
+  createdAt?: string;
 }
 
 export interface SchoolDirectoryEntry {

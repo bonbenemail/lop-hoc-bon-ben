@@ -14,6 +14,7 @@ import { StudentPortfolioModal } from './components/StudentPortfolioModal';
 import { SupportModal } from './components/SupportModal';
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { AdminPortal } from './components/AdminPortal';
+import { NotificationInbox } from './components/NotificationInbox';
 import {
   getAllRegisteredAccounts,
   saveAllRegisteredAccounts,
@@ -26,6 +27,10 @@ import {
   signOutFirebaseAdmin,
   subscribeToFirebaseAdmin
 } from './services/firebaseAdminAuth';
+import {
+  firebaseProfileToUserAccount,
+  getFirebaseUserProfile,
+} from './services/firebaseNotifications';
 import {
   FileText,
   GraduationCap,
@@ -79,6 +84,7 @@ export default function App() {
     return null;
   });
   const adminAuthSessionRestored = useRef(false);
+  const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
 
   const [activePage, setActivePage] = useState<AppPage>(() => {
     if (
@@ -103,6 +109,7 @@ export default function App() {
         ) {
           adminAuthSessionRestored.current = true;
           const adminAccount = createFirebaseAdminAccount(firebaseUser, currentGrade);
+          setFirebaseUid(firebaseUser.uid);
           setCurrentUser(adminAccount);
           setCurrentGrade(adminAccount.grade);
           setActivePage('admin-portal');
@@ -110,10 +117,34 @@ export default function App() {
           return;
         }
 
+        if (firebaseUser?.emailVerified) {
+          setFirebaseUid(firebaseUser.uid);
+          void getFirebaseUserProfile(firebaseUser.uid)
+            .then((profile) => {
+              if (!profile) return;
+              const profileAccount = firebaseProfileToUserAccount(profile);
+              setCurrentUser((user) =>
+                user?.email.toLowerCase() === profile.email.toLowerCase()
+                  ? { ...user, firebaseUid: firebaseUser.uid }
+                  : profileAccount
+              );
+              setCurrentGrade(profile.grade);
+            })
+            .catch((error: unknown) => {
+              console.error('FIREBASE_USER_PROFILE_RESTORE_ERROR:', error);
+            });
+          return;
+        }
+
+        setFirebaseUid(null);
         if (adminAuthSessionRestored.current) {
           adminAuthSessionRestored.current = false;
           localStorage.removeItem('bonben_user_account');
           setCurrentUser((user) => (user?.role === 'admin' ? null : user));
+          setActivePage('home');
+        } else if (!firebaseUser) {
+          localStorage.removeItem('bonben_user_account');
+          setCurrentUser((user) => (user?.role === 'admin' ? user : null));
           setActivePage('home');
         }
       });
@@ -201,6 +232,7 @@ export default function App() {
       if (matched) finalUser = matched;
     }
     setCurrentUser(finalUser);
+    setFirebaseUid(finalUser.firebaseUid || null);
     setCurrentGrade(finalUser.grade);
     localStorage.setItem('bonben_user_account', JSON.stringify(finalUser));
 
@@ -260,6 +292,7 @@ export default function App() {
       return;
     }
     setCurrentUser(null);
+    setFirebaseUid(null);
     setActivePage('home');
     localStorage.removeItem('bonben_user_account');
     showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập hoặc tạo tài khoản mới.');
@@ -736,6 +769,8 @@ export default function App() {
         currentUser={currentUser}
         currentGrade={currentGrade}
       />
+
+      <NotificationInbox uid={firebaseUid} />
 
       <AuthModal
         isOpen={isAuthOpen}
