@@ -50,6 +50,7 @@ export const AdminSupportInbox: React.FC = () => {
         !keyword ||
         ticket.senderName.toLowerCase().includes(keyword) ||
         ticket.senderEmail.toLowerCase().includes(keyword) ||
+        (ticket.senderUsername || '').toLowerCase().includes(keyword) ||
         ticket.issueContent.toLowerCase().includes(keyword) ||
         ticket.topic.toLowerCase().includes(keyword);
       return matchFilter && matchSearch;
@@ -147,6 +148,11 @@ export const AdminSupportInbox: React.FC = () => {
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-extrabold text-slate-900">{ticket.senderName}</span>
+                      {ticket.senderUsername && (
+                        <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                          @{ticket.senderUsername}
+                        </span>
+                      )}
                       <span className="rounded-md bg-slate-200/70 px-2 py-0.5 text-[11px] font-bold text-slate-700">
                         {ticket.senderEmail}
                       </span>

@@ -14,6 +14,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
+  BlockedRelation,
   Conversation,
   DirectMessage,
   FriendRequest,
@@ -331,6 +332,11 @@ export const sendDirectMessage = async (
   if (!members.includes(myUid)) {
     throw new Error('Bạn không thuộc cuộc trò chuyện này.');
   }
+  // Hội thoại dùng chung id với quan hệ chặn: nếu tồn tại thì không cho gửi.
+  const blockSnapshot = await getDoc(doc(db, 'blocks', conversationId));
+  if (blockSnapshot.exists()) {
+    throw new Error('Không thể gửi tin nhắn vì cuộc trò chuyện này đang bị chặn.');
+  }
   const recipient = members.find((member) => member !== myUid) ?? '';
   const now = Date.now();
   const batch = writeBatch(db);
@@ -361,4 +367,56 @@ export const markConversationRead = async (
   await updateDoc(doc(getDb(), 'conversations', conversationId), {
     [`unread.${uid}`]: 0,
   });
+};
+
+/* ------------------------------------------------------------------ */
+/* Chặn / bỏ chặn                                                      */
+/* ------------------------------------------------------------------ */
+
+export const subscribeToBlocks = (
+  uid: string,
+  callback: (blocks: BlockedRelation[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe => {
+  const blocksQuery = query(
+    collection(getDb(), 'blocks'),
+    where('members', 'array-contains', uid)
+  );
+  return onSnapshot(
+    blocksQuery,
+    (snapshot) => {
+      callback(
+        snapshot.docs
+          .map((item) => ({ id: item.id, ...(item.data() as Omit<BlockedRelation, 'id'>) }))
+          .sort((a, b) => b.createdAt - a.createdAt)
+      );
+    },
+    (error) => onError?.(error)
+  );
+};
+
+/** Chặn một người dùng: hội thoại dùng chung id nên tin nhắn sẽ bị dừng hai chiều. */
+export const blockUser = async (
+  me: UserAccount,
+  peer: SocialMemberProfile
+): Promise<void> => {
+  const myUid = requireUid(me);
+  if (!peer.uid || peer.uid === myUid) {
+    throw new Error('Bạn không thể chặn chính mình.');
+  }
+  const id = pairId(myUid, peer.uid);
+  await setDoc(doc(getDb(), 'blocks', id), {
+    members: [myUid, peer.uid],
+    blockerUid: myUid,
+    blockedUid: peer.uid,
+    profiles: {
+      [myUid]: buildMemberProfile(me),
+      [peer.uid]: cleanMemberProfile(peer),
+    },
+    createdAt: Date.now(),
+  });
+};
+
+export const unblockUser = async (blockId: string): Promise<void> => {
+  await deleteDoc(doc(getDb(), 'blocks', blockId));
 };

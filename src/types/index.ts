@@ -164,6 +164,8 @@ export interface SupportTicket {
   id: string;
   senderName: string;
   senderEmail: string;
+  /** Tên đăng nhập (username) của người gửi, hiển thị kèm trong hộp thư hỗ trợ. */
+  senderUsername?: string;
   senderUid?: string;
   gradeInfo: string;
   schoolInfo: string;
@@ -240,6 +242,18 @@ export interface DirectMessage {
   senderName: string;
   text: string;
   members: string[];
+  createdAt: number;
+}
+
+/** Quan hệ chặn giữa 2 người dùng (document id = khóa ghép cặp uid). */
+export interface BlockedRelation {
+  id: string;
+  members: string[];
+  /** Người đã bấm chặn. */
+  blockerUid: string;
+  /** Người bị chặn. */
+  blockedUid: string;
+  profiles: Record<string, SocialMemberProfile>;
   createdAt: number;
 }
 

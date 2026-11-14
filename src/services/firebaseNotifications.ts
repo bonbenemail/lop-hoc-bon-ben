@@ -372,7 +372,8 @@ export const saveManagedFirebaseProfile = async (
       await syncUsernameDirectory(
         account.username,
         account.firebaseUid,
-        usernameDirectoryInfoFromAccount(account)
+        usernameDirectoryInfoFromAccount(account),
+        account.email
       );
     } catch (error) {
       console.error('FIREBASE_USERNAME_DIRECTORY_SYNC_ERROR:', error);
@@ -411,7 +412,8 @@ export const saveOwnFirebaseProfile = async (account: UserAccount): Promise<void
       await syncUsernameDirectory(
         account.username,
         account.firebaseUid,
-        usernameDirectoryInfoFromAccount(account)
+        usernameDirectoryInfoFromAccount(account),
+        account.email
       );
     } catch (error) {
       console.error('FIREBASE_OWN_USERNAME_DIRECTORY_SYNC_ERROR:', error);
@@ -528,7 +530,8 @@ export const upsertAuthenticatedFirebaseUser = async (
       await syncUsernameDirectory(
         resolvedAccount.username,
         user.uid,
-        usernameDirectoryInfoFromAccount(resolvedAccount)
+        usernameDirectoryInfoFromAccount(resolvedAccount),
+        email
       );
     } catch (error) {
       console.error('FIREBASE_AUTHENTICATED_USERNAME_DIRECTORY_SYNC_ERROR:', error);
@@ -992,6 +995,8 @@ const supportTicketFromSnapshot = (
     id,
     senderName: data.senderName,
     senderEmail: data.senderEmail,
+    senderUsername:
+      typeof data.senderUsername === 'string' && data.senderUsername ? data.senderUsername : undefined,
     senderUid: typeof data.senderUid === 'string' && data.senderUid ? data.senderUid : undefined,
     gradeInfo: typeof data.gradeInfo === 'string' ? data.gradeInfo : '',
     schoolInfo: typeof data.schoolInfo === 'string' ? data.schoolInfo : '',
@@ -1010,6 +1015,7 @@ const supportTicketFromSnapshot = (
 export const submitSupportTicket = async (ticket: {
   senderName: string;
   senderEmail: string;
+  senderUsername?: string;
   senderUid?: string;
   gradeInfo: string;
   schoolInfo: string;
@@ -1020,6 +1026,7 @@ export const submitSupportTicket = async (ticket: {
   await setDoc(ticketRef, {
     senderName: ticket.senderName.trim(),
     senderEmail: ticket.senderEmail.trim().toLowerCase(),
+    senderUsername: ticket.senderUsername?.trim() || '',
     senderUid: ticket.senderUid || '',
     gradeInfo: ticket.gradeInfo.trim(),
     schoolInfo: ticket.schoolInfo.trim(),

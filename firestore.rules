@@ -25,12 +25,14 @@ service cloud.firestore {
 
     function isValidSupportTicket() {
       return request.resource.data.keys().hasOnly([
-          'senderName', 'senderEmail', 'senderUid', 'gradeInfo', 'schoolInfo',
+          'senderName', 'senderEmail', 'senderUsername', 'senderUid', 'gradeInfo', 'schoolInfo',
           'topic', 'issueContent', 'createdAt', 'handled'
         ]) &&
         request.resource.data.senderName is string &&
         request.resource.data.senderName.size() > 0 &&
         request.resource.data.senderName.size() <= 200 &&
+        request.resource.data.senderUsername is string &&
+        request.resource.data.senderUsername.size() <= 60 &&
         request.resource.data.senderEmail is string &&
         request.resource.data.senderEmail.matches('^[A-Za-z0-9._%+-]+@gmail\\.com$') &&
         request.resource.data.topic is string &&
@@ -165,6 +167,19 @@ service cloud.firestore {
         (request.auth != null && resource.data.uid == request.auth.uid);
     }
 
+    // Bảng ánh xạ email -> { uid, username } để tìm bạn bằng email.
+    // Cho phép tra cứu công khai theo đúng email (document id) mà không lộ danh sách toàn bộ.
+    match /emailDirectory/{emailKey} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if request.auth != null &&
+        request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
     // Lời mời kết bạn: document id là khóa ghép cặp của 2 uid.
     match /friendRequests/{requestId} {
       allow get: if isAdmin() || isParticipant(resource.data.members);
@@ -197,6 +212,15 @@ service cloud.firestore {
           isParticipant(get(/databases/$(database)/documents/conversations/$(conversationId)).data.members);
         allow update, delete: if isAdmin();
       }
+    }
+
+    // Quan hệ chặn giữa 2 người dùng: chỉ 2 thành viên đọc/ghi, Admin đọc toàn bộ.
+    match /blocks/{blockId} {
+      allow get: if isAdmin() || isParticipant(resource.data.members);
+      allow list: if isAdmin() || authenticated();
+      allow create: if isParticipant(request.resource.data.members) &&
+        request.resource.data.blockerUid == request.auth.uid;
+      allow update, delete: if isAdmin() || isParticipant(resource.data.members);
     }
   }
 }

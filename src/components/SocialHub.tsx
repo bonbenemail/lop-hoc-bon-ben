@@ -1,18 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Ban,
   Check,
   Clock,
   Loader2,
   MessageCircle,
   Search,
   Send,
+  ShieldCheck,
   Trash2,
   UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import type {
+  BlockedRelation,
   Conversation,
   DirectMessage,
   FriendRequest,
@@ -20,9 +23,10 @@ import type {
   SocialMemberProfile,
   UserAccount,
 } from '../types';
-import { lookupDirectoryByUsername } from '../services/usernames';
+import { lookupDirectoryByEmail, lookupDirectoryByUsername } from '../services/usernames';
 import {
   acceptFriendRequest,
+  blockUser,
   cancelFriendRequest,
   declineFriendRequest,
   ensureConversation,
@@ -32,10 +36,12 @@ import {
   removeFriend,
   sendDirectMessage,
   sendFriendRequest,
+  subscribeToBlocks,
   subscribeToConversations,
   subscribeToFriendRequests,
   subscribeToFriendships,
   subscribeToMessages,
+  unblockUser,
 } from '../services/social';
 
 interface SocialHubProps {
@@ -94,6 +100,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendships, setFriendships] = useState<Friendship[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [blocks, setBlocks] = useState<BlockedRelation[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -116,6 +123,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
       setOutgoingRequests([]);
       setFriendships([]);
       setConversations([]);
+      setBlocks([]);
       return;
     }
     const handleError = (error: unknown) => {
@@ -129,6 +137,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
       }, handleError),
       subscribeToFriendships(myUid, setFriendships, handleError),
       subscribeToConversations(myUid, setConversations, handleError),
+      subscribeToBlocks(myUid, setBlocks, handleError),
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [myUid]);
@@ -163,6 +172,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
     return 'none';
   };
 
+  /** Quan hệ chặn (nếu có) giữa tôi và một người dùng khác. */
+  const blockWith = (targetUid: string): BlockedRelation | null =>
+    blocks.find((item) => item.members.includes(targetUid)) || null;
+
   const runAction = async (
     action: () => Promise<void>,
     successMessage: string,
@@ -187,9 +200,12 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
     setSearchFeedback(null);
     setErrorMessage(null);
     try {
-      const entry = await lookupDirectoryByUsername(term);
+      // Hỗ trợ tìm bạn bằng cả tên tài khoản lẫn email.
+      const entry = term.includes('@')
+        ? await lookupDirectoryByEmail(term)
+        : await lookupDirectoryByUsername(term);
       if (!entry) {
-        setSearchFeedback('Không tìm thấy tài khoản nào có tên này.');
+        setSearchFeedback('Không tìm thấy tài khoản nào có tên đăng nhập hoặc email này.');
         return;
       }
       if (entry.uid === myUid) {
@@ -199,7 +215,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
       setSearchResult(profileFromDirectory(entry));
     } catch (error) {
       console.error('SOCIAL_HUB_SEARCH_ERROR:', error);
-      setSearchFeedback('Không tra cứu được tên tài khoản. Vui lòng thử lại.');
+      setSearchFeedback('Không tra cứu được. Vui lòng thử lại.');
     } finally {
       setIsSearching(false);
     }
@@ -336,7 +352,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
     <div className="space-y-4 p-4">
       <div>
         <label htmlFor="social-search" className="text-xs font-bold text-slate-600">
-          Nhập đúng tên tài khoản để tìm bạn
+          Nhập tên đăng nhập hoặc email để tìm bạn
         </label>
         <div className="mt-1.5 flex gap-2">
           <input
@@ -346,7 +362,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
             onKeyDown={(event) => {
               if (event.key === 'Enter') void handleSearch();
             }}
-            placeholder="Ví dụ: nguyenvanan01"
+            placeholder="Ví dụ: nguyenvanan01 hoặc tenban@gmail.com"
             className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
           <button
@@ -514,6 +530,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
 
   const renderMessagesTab = () => {
     if (activeChat) {
+      const activeBlock = blockWith(activeChat.peer.uid);
       return (
         <div className="flex h-full flex-col">
           <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -537,6 +554,37 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
                 {describeProfile(activeChat.peer)}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                const peer = activeChat.peer;
+                if (activeBlock) {
+                  void runAction(
+                    () => unblockUser(activeBlock.id),
+                    `Đã bỏ chặn ${peer.fullName}. Hai bạn có thể nhắn tin lại.`,
+                    'Không bỏ chặn được.'
+                  );
+                } else {
+                  void runAction(
+                    () => blockUser(currentUser, peer),
+                    `Đã chặn ${peer.fullName}. Hai bạn tạm thời không thể nhắn tin.`,
+                    'Không chặn được người dùng này.'
+                  );
+                }
+              }}
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold ${
+                activeBlock
+                  ? 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50'
+                  : 'border-red-200 bg-white text-red-600 hover:bg-red-50'
+              }`}
+            >
+              {activeBlock ? (
+                <ShieldCheck className="h-3.5 w-3.5" />
+              ) : (
+                <Ban className="h-3.5 w-3.5" />
+              )}
+              <span>{activeBlock ? 'Bỏ chặn' : 'Chặn'}</span>
+            </button>
           </div>
 
           <div className="flex-1 space-y-2 overflow-y-auto bg-slate-100/60 p-4">
@@ -570,32 +618,41 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
           </div>
 
           <div className="flex items-end gap-2 border-t border-slate-200 bg-white p-3">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void handleSendMessage();
-                }
-              }}
-              rows={1}
-              placeholder="Nhập tin nhắn..."
-              className="max-h-28 min-h-[42px] min-w-0 flex-1 resize-none rounded-2xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-            />
-            <button
-              type="button"
-              onClick={() => void handleSendMessage()}
-              disabled={!draft.trim() || isSending}
-              aria-label="Gửi tin nhắn"
-              className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {isSending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Send className="h-5 w-5" />
-              )}
-            </button>
+            {activeBlock ? (
+              <p className="flex flex-1 items-center gap-2 rounded-2xl bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-900">
+                <Ban className="h-4 w-4 shrink-0" />
+                Cuộc trò chuyện đang bị chặn. Bấm “Bỏ chặn” để tiếp tục nhắn tin.
+              </p>
+            ) : (
+              <>
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      void handleSendMessage();
+                    }
+                  }}
+                  rows={1}
+                  placeholder="Nhập tin nhắn..."
+                  className="max-h-28 min-h-[42px] min-w-0 flex-1 resize-none rounded-2xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSendMessage()}
+                  disabled={!draft.trim() || isSending}
+                  aria-label="Gửi tin nhắn"
+                  className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {isSending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Send className="h-5 w-5" />
+                  )}
+                </button>
+              </>
+            )}
           </div>
         </div>
       );
@@ -613,6 +670,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
               const peer = otherMemberProfile(conversation.members, conversation.profiles, myUid);
               if (!peer) return null;
               const unread = conversation.unread?.[myUid] || 0;
+              const isBlocked = !!blockWith(peer.uid);
               return (
                 <button
                   key={conversation.id}
@@ -623,8 +681,15 @@ export const SocialHub: React.FC<SocialHubProps> = ({ currentUser, onNotice }) =
                   <Avatar profile={peer} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-extrabold text-slate-900">
-                        {peer.fullName}
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate font-extrabold text-slate-900">
+                          {peer.fullName}
+                        </span>
+                        {isBlocked && (
+                          <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black text-red-600">
+                            ĐÃ CHẶN
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 text-[10px] text-slate-400">
                         {conversation.lastMessageAt ? formatDay(conversation.lastMessageAt) : ''}

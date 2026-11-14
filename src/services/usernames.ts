@@ -25,6 +25,11 @@ const USERNAME_PATTERN = /^[a-z0-9._]+$/;
 
 const getDb = () => getFirestore(getFirebaseApp());
 const getUsernamesCollection = () => collection(getDb(), 'usernames');
+/**
+ * Bảng ánh xạ email -> { uid, username } với document id chính là email đã chuẩn hóa.
+ * Cho phép tra cứu công khai (get) để tìm bạn bằng email mà không lộ danh sách toàn bộ người dùng.
+ */
+const getEmailDirectoryCollection = () => collection(getDb(), 'emailDirectory');
 
 export const normalizeUsername = (raw: string): string => raw.trim().toLowerCase();
 
@@ -95,13 +100,30 @@ export const reserveUsername = async (
     email: email.trim().toLowerCase(),
     ...directoryFieldsFrom(info),
   });
+  await saveEmailDirectory(email, uid, username);
+};
+
+/** Lưu ánh xạ email -> username để tra cứu tìm bạn bằng email. */
+const saveEmailDirectory = async (
+  email: string,
+  uid: string,
+  username: string
+): Promise<void> => {
+  const key = email.trim().toLowerCase();
+  if (!key) return;
+  await setDoc(
+    doc(getEmailDirectoryCollection(), key),
+    { uid, username, email: key },
+    { merge: true }
+  );
 };
 
 /** Cập nhật hồ sơ công khai trong document username (nếu tài khoản có username). */
 export const syncUsernameDirectory = async (
   raw: string,
   uid: string,
-  info: UsernameDirectoryInfo
+  info: UsernameDirectoryInfo,
+  email?: string
 ): Promise<void> => {
   const username = normalizeUsername(raw);
   if (!username) return;
@@ -109,6 +131,7 @@ export const syncUsernameDirectory = async (
   const snapshot = await getDoc(ref);
   if (!snapshot.exists() || snapshot.data().uid !== uid) return;
   await setDoc(ref, { username, uid, ...directoryFieldsFrom(info) }, { merge: true });
+  if (email) await saveEmailDirectory(email, uid, username);
 };
 
 /** Tra cứu hồ sơ công khai theo tên tài khoản (dùng cho chức năng tìm bạn). */
@@ -134,6 +157,19 @@ export const lookupDirectoryByUsername = async (
   };
 };
 
+/** Tra cứu hồ sơ công khai theo email (dùng cho chức năng tìm bạn bằng email). */
+export const lookupDirectoryByEmail = async (
+  raw: string
+): Promise<UserDirectoryEntry | null> => {
+  const key = raw.trim().toLowerCase();
+  if (!key) return null;
+  const snapshot = await getDoc(doc(getEmailDirectoryCollection(), key));
+  if (!snapshot.exists()) return null;
+  const username = snapshot.data().username;
+  if (typeof username !== 'string' || !username) return null;
+  return lookupDirectoryByUsername(username);
+};
+
 /** Giải phóng tên tài khoản (dùng khi đổi tên hoặc hoàn tác đăng ký). */
 export const releaseUsername = async (raw: string): Promise<void> => {
   const username = normalizeUsername(raw);
@@ -144,8 +180,12 @@ export const releaseUsername = async (raw: string): Promise<void> => {
 /** Xóa mọi tên tài khoản gắn với một uid (dùng khi xóa tài khoản). */
 export const releaseUsernamesForUid = async (uid: string): Promise<void> => {
   if (!uid) return;
-  const snapshot = await getDocs(
-    query(getUsernamesCollection(), where('uid', '==', uid))
-  );
-  await Promise.all(snapshot.docs.map((usernameDoc) => deleteDoc(usernameDoc.ref)));
+  const [usernameSnapshot, emailSnapshot] = await Promise.all([
+    getDocs(query(getUsernamesCollection(), where('uid', '==', uid))),
+    getDocs(query(getEmailDirectoryCollection(), where('uid', '==', uid))),
+  ]);
+  await Promise.all([
+    ...usernameSnapshot.docs.map((usernameDoc) => deleteDoc(usernameDoc.ref)),
+    ...emailSnapshot.docs.map((emailDoc) => deleteDoc(emailDoc.ref)),
+  ]);
 };

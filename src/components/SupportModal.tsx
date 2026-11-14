@@ -85,6 +85,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({
       await submitSupportTicket({
         senderName: senderName.trim(),
         senderEmail: senderEmail.trim().toLowerCase(),
+        senderUsername: currentUser?.username,
         senderUid: currentUser?.firebaseUid,
         gradeInfo: gradeInfo.trim() || `Lớp ${currentGrade}`,
         schoolInfo: schoolInfo.trim(),
