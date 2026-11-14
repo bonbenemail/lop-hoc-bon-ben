@@ -61,6 +61,12 @@ import {
   sendFirebaseUserPasswordReset,
   subscribeToFirebaseUsers,
 } from '../services/firebaseNotifications';
+import {
+  isUsernameAvailable,
+  isValidUsername,
+  normalizeUsername,
+  USERNAME_INVALID_MESSAGE,
+} from '../services/usernames';
 
 const isValidImageUrl = (value: string): boolean => {
   const trimmed = value.trim();
@@ -104,6 +110,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [newAccountRole, setNewAccountRole] = useState<'student' | 'teacher' | 'school'>('school');
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountEmail, setNewAccountEmail] = useState('');
+  const [newAccountUsername, setNewAccountUsername] = useState('');
   const [newAccountPassword, setNewAccountPassword] = useState('');
   const [newAccountGrade, setNewAccountGrade] = useState<GradeLevel>(4);
   const [newAccountClass, setNewAccountClass] = useState('4A1');
@@ -495,6 +502,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
 
+    const username = normalizeUsername(newAccountUsername);
+    if (!isValidUsername(username)) {
+      notify(`⚠️ ${USERNAME_INVALID_MESSAGE}`, true);
+      return;
+    }
+    try {
+      if (!(await isUsernameAvailable(username))) {
+        notify('⚠️ Tên tài khoản này đã được sử dụng. Vui lòng chọn tên khác.', true);
+        return;
+      }
+    } catch (error) {
+      console.error('ADMIN_USERNAME_AVAILABILITY_CHECK_ERROR:', error);
+    }
+
     const province = VIETNAM_ADMIN_UNITS.find((entry) => entry.name === newAccountProvince);
     if (!province || !province.wards.some((ward) => ward.name === newAccountDistrict)) {
       notify('⚠️ Hãy chọn tỉnh/thành và phường/xã hợp lệ.', true);
@@ -534,6 +555,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       id: `user-${Date.now()}`,
       fullName: newAccountName.trim(),
       email,
+      username,
       grade: newAccountGrade,
       className: newAccountRole === 'school' ? '' : newAccountClass.trim().toUpperCase(),
       school: schoolName,
@@ -566,6 +588,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       onAccountsChange();
       setNewAccountName('');
       setNewAccountEmail('');
+      setNewAccountUsername('');
       setNewAccountPassword('');
       setNewAccountProvince('');
       setNewAccountDistrict('');
@@ -578,9 +601,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         error && typeof error === 'object' && 'code' in error &&
         String(error.code) === 'auth/email-already-in-use'
           ? 'Gmail này đã tồn tại trong Firebase Authentication.'
-          : error instanceof Error
-            ? error.message
-            : 'Không tạo được tài khoản Firebase.';
+          : error instanceof Error && error.message === 'USERNAME_TAKEN'
+            ? 'Tên tài khoản này đã được sử dụng. Vui lòng chọn tên khác.'
+            : error instanceof Error
+              ? error.message
+              : 'Không tạo được tài khoản Firebase.';
       notify(`⚠️ Không tạo được tài khoản: ${message}`, true);
     } finally {
       setIsCreatingManagedAccount(false);
@@ -1859,6 +1884,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 value={newAccountEmail}
                 onChange={(event) => setNewAccountEmail(event.target.value)}
                 placeholder="ten@gmail.com"
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200"
+              />
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Tên tài khoản (tối thiểu 8 ký tự)
+              <input
+                required
+                type="text"
+                value={newAccountUsername}
+                onChange={(event) => setNewAccountUsername(event.target.value)}
+                placeholder="Ví dụ: nguyenben2000"
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200"
               />
             </label>

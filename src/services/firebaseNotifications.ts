@@ -39,6 +39,16 @@ import {
   getFirebaseApp,
   getFirebaseAuth,
 } from './firebaseAdminAuth';
+import {
+  USERNAME_INVALID_MESSAGE,
+  isUsernameAvailable,
+  isValidUsername,
+  lookupEmailByUsername,
+  normalizeUsername,
+  releaseUsername,
+  releaseUsernamesForUid,
+  reserveUsername,
+} from './usernames';
 
 const getDb = () => getFirestore(getFirebaseApp());
 const getUsersCollection = () => collection(getDb(), 'users');
@@ -53,11 +63,21 @@ export const registerFirebaseUser = async (
   account: UserAccount
 ): Promise<void> => {
   const auth = getFirebaseAuth();
+  const username = account.username ? normalizeUsername(account.username) : '';
+  if (username) {
+    if (!isValidUsername(username)) {
+      throw new Error(USERNAME_INVALID_MESSAGE);
+    }
+    if (!(await isUsernameAvailable(username))) {
+      throw new Error('USERNAME_TAKEN');
+    }
+  }
   const credential = await createUserWithEmailAndPassword(
     auth,
     email.trim().toLowerCase(),
     password
   );
+  let usernameReserved = false;
   try {
     // KHÔNG gọi sendEmailVerification: mã OTP 6 số đã xác thực qua email,
     // người dùng nhập đúng mã là hoàn tất đăng ký, không cần link xác minh của Firebase.
@@ -71,8 +91,19 @@ export const registerFirebaseUser = async (
       ),
       { merge: true }
     );
+    if (username) {
+      await reserveUsername(username, credential.user.uid, credential.user.email || email);
+      usernameReserved = true;
+    }
   } catch (error) {
     console.error('FIREBASE_REGISTRATION_ERROR:', error);
+    if (usernameReserved) {
+      try {
+        await releaseUsername(username);
+      } catch (releaseError) {
+        console.error('FIREBASE_REGISTRATION_USERNAME_RELEASE_ERROR:', releaseError);
+      }
+    }
     try {
       await deleteUser(credential.user);
     } catch (cleanupError) {
@@ -89,23 +120,29 @@ export const registerFirebaseUser = async (
 };
 
 export const signInFirebaseUser = async (
-  email: string,
+  identifier: string,
   password: string
 ): Promise<User> => {
   const auth = getFirebaseAuth();
+  const trimmed = identifier.trim().toLowerCase();
+  // Cho phép đăng nhập bằng email hoặc tên tài khoản (username).
+  let email = trimmed;
+  if (trimmed && !trimmed.includes('@')) {
+    const resolvedEmail = await lookupEmailByUsername(trimmed);
+    if (!resolvedEmail) {
+      throw new Error('Không tìm thấy tài khoản với tên đăng nhập này.');
+    }
+    email = resolvedEmail;
+  }
   try {
-    const credential = await signInWithEmailAndPassword(
-      auth,
-      email.trim().toLowerCase(),
-      password
-    );
+    const credential = await signInWithEmailAndPassword(auth, email, password);
     // Không chặn theo emailVerified của Firebase nữa: tài khoản đã được
     // xác thực bằng mã OTP 6 số gửi về email khi đăng ký.
     return credential.user;
   } catch (error) {
     const code = getFirebaseErrorCode(error);
     if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-      throw new Error('Email hoặc mật khẩu không chính xác.');
+      throw new Error('Tên tài khoản/Email hoặc mật khẩu không chính xác.');
     }
     if (code === 'auth/user-not-found') {
       throw new Error('FIREBASE_USER_NOT_FOUND');
@@ -158,6 +195,7 @@ const profileFromSnapshot = (
   return {
     uid,
     email: data.email,
+    username: typeof data.username === 'string' ? data.username : undefined,
     fullName: displayName,
     displayName,
     role,
@@ -218,6 +256,7 @@ export const firebaseProfileToUserAccount = (
   firebaseUid: profile.uid,
   fullName: profile.fullName,
   email: profile.email,
+  username: profile.username,
   grade: profile.grade,
   phone: profile.phone,
   avatar: profile.avatar,
@@ -247,6 +286,7 @@ const profileDataFromAccount = (
 ): Omit<FirebaseUserProfile, 'uid'> => {
   return {
     email: email.trim().toLowerCase(),
+    ...(account.username ? { username: normalizeUsername(account.username) } : {}),
     fullName: account.fullName,
     displayName: account.fullName,
     role: account.role,
@@ -398,6 +438,7 @@ export const upsertAuthenticatedFirebaseUser = async (
     firebaseUid: user.uid,
     fullName: displayName,
     email,
+    username: account?.username,
     grade: account?.grade || 4,
     phone: account?.phone,
     avatar: account?.avatar,
@@ -632,7 +673,14 @@ export const deleteFirebaseUser = async (uid: string, email?: string): Promise<v
     console.error('FIREBASE_USER_RELATED_DATA_DELETE_ERROR:', error);
   }
 
-  // 4) Xóa document chính của người dùng trong collection users
+  // 4) Giải phóng tên tài khoản (username) để có thể dùng lại
+  try {
+    await releaseUsernamesForUid(uid);
+  } catch (error) {
+    console.error('FIREBASE_USERNAME_RELEASE_ERROR:', error);
+  }
+
+  // 5) Xóa document chính của người dùng trong collection users
   try {
     await deleteDoc(doc(getUsersCollection(), uid));
   } catch (error) {
@@ -709,11 +757,22 @@ export const createManagedFirebaseProfile = async (
   const provisioningAuth = getAuth(provisioningApp);
   if (!password) throw new Error('Thiếu mật khẩu khi tạo tài khoản được Admin quản lý.');
 
+  const username = account.username ? normalizeUsername(account.username) : '';
+  if (username) {
+    if (!isValidUsername(username)) {
+      throw new Error(USERNAME_INVALID_MESSAGE);
+    }
+    if (!(await isUsernameAvailable(username))) {
+      throw new Error('USERNAME_TAKEN');
+    }
+  }
+
   const credential = await createUserWithEmailAndPassword(
     provisioningAuth,
     account.email.toLowerCase(),
     password
   );
+  let usernameReserved = false;
   try {
     // Không gửi link xác minh của Firebase cho tài khoản do Admin tạo.
     await updateProfile(credential.user, { displayName: account.fullName });
@@ -731,9 +790,20 @@ export const createManagedFirebaseProfile = async (
       },
       { merge: true }
     );
+    if (username) {
+      await reserveUsername(username, credential.user.uid, account.email);
+      usernameReserved = true;
+    }
     return credential.user.uid;
   } catch (error) {
     console.error('FIREBASE_MANAGED_ACCOUNT_PROFILE_WRITE_ERROR:', error);
+    if (usernameReserved) {
+      try {
+        await releaseUsername(username);
+      } catch (releaseError) {
+        console.error('FIREBASE_MANAGED_ACCOUNT_USERNAME_RELEASE_ERROR:', releaseError);
+      }
+    }
     try {
       await deleteUser(credential.user);
     } catch (cleanupError) {

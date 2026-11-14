@@ -55,6 +55,13 @@ import {
   formatSchoolName,
   getConfiguredMascotImage
 } from '../services/schoolManager';
+import {
+  isUsernameAvailable,
+  isValidUsername,
+  normalizeUsername,
+  USERNAME_INVALID_MESSAGE,
+  USERNAME_MIN_LENGTH
+} from '../services/usernames';
 
 const ADMIN_GMAIL = FIREBASE_ADMIN_EMAIL;
 
@@ -113,6 +120,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [registerAccountType, setRegisterAccountType] = useState<'student' | 'teacher'>('student');
   const [fullName, setFullName] = useState(currentUser?.fullName || '');
   const [email, setEmail] = useState(currentUser?.email || '');
+  const [username, setUsername] = useState(currentUser?.username || '');
   const [password, setPassword] = useState('');
   const [isAdminSigningIn, setIsAdminSigningIn] = useState(false);
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(currentUser?.grade || currentGrade);
@@ -464,6 +472,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       id: `user-${Date.now()}`,
       fullName: fullName.trim(),
       email: cleanEmail,
+      username: normalizeUsername(username),
       grade: selectedGrade,
       className: cleanClass,
       school: cleanSchool,
@@ -499,13 +508,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } catch (error: unknown) {
       const code =
         error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      const rawMessage = error instanceof Error ? error.message : '';
       setErrors({
         otp:
           code === 'auth/email-already-in-use'
             ? 'Gmail này đã có tài khoản Firebase. Hãy chuyển sang Đăng nhập hoặc dùng chức năng khôi phục mật khẩu.'
-            : error instanceof Error
-              ? error.message
-              : 'Không thể tạo tài khoản Firebase. Vui lòng thử lại.',
+            : rawMessage === 'USERNAME_TAKEN'
+              ? 'Tên tài khoản này vừa được người khác sử dụng. Vui lòng quay lại chọn tên tài khoản khác.'
+              : rawMessage || 'Không thể tạo tài khoản Firebase. Vui lòng thử lại.',
       });
       return;
     }
@@ -530,14 +540,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: { [key: string]: string } = {};
-    const cleanEmail = email.trim().toLowerCase();
+    const identifier = email.trim();
+    const cleanEmail = identifier.toLowerCase();
+    const isLoginMode = authMode === 'login';
+    // Khi Đăng nhập, người dùng có thể nhập Gmail hoặc tên tài khoản (không chứa dấu @).
+    const loginByUsername = isLoginMode && identifier !== '' && !identifier.includes('@');
 
-    // 1. Kiểm tra bắt buộc phải là địa chỉ Gmail (@gmail.com)
-    if (!cleanEmail) {
-      newErrors.email = 'Vui lòng nhập địa chỉ Gmail (@gmail.com) của bạn (bắt buộc).';
+    // 1. Kiểm tra Gmail (Đăng ký/Quên mật khẩu) hoặc Gmail/Tên tài khoản (Đăng nhập)
+    if (loginByUsername) {
+      if (!isValidUsername(identifier)) {
+        newErrors.email = USERNAME_INVALID_MESSAGE;
+      }
+    } else if (!cleanEmail) {
+      newErrors.email = isLoginMode
+        ? 'Vui lòng nhập Gmail hoặc tên tài khoản của bạn (bắt buộc).'
+        : 'Vui lòng nhập địa chỉ Gmail (@gmail.com) của bạn (bắt buộc).';
     } else if (!validateEmail(cleanEmail)) {
-      newErrors.email =
-        'Chỉ chấp nhận địa chỉ Gmail hợp lệ có đuôi @gmail.com (Ví dụ: hocsinh@gmail.com).';
+      newErrors.email = isLoginMode
+        ? 'Địa chỉ Gmail không hợp lệ. Nếu đăng nhập bằng tên tài khoản, hãy nhập đúng tên tài khoản (không có dấu @).'
+        : 'Chỉ chấp nhận địa chỉ Gmail hợp lệ có đuôi @gmail.com (Ví dụ: hocsinh@gmail.com).';
     }
 
     // 2. Password check (Bắt buộc mật khẩu trên 6 ký tự)
@@ -547,10 +568,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       newErrors.password = `Mật khẩu phải trên 6 ký tự (từ 7 ký tự trở lên). Hiện có: ${password.length} ký tự.`;
     }
 
-    // 3. Name, Class, School checks for Register
+    // 3. Name, Username, Class, School checks for Register
     if (authMode === 'register') {
       if (!fullName.trim()) {
         newErrors.fullName = 'Vui lòng nhập họ và tên.';
+      }
+      if (!username.trim()) {
+        newErrors.username = 'Vui lòng nhập tên tài khoản.';
+      } else if (!isValidUsername(username)) {
+        newErrors.username = USERNAME_INVALID_MESSAGE;
       }
       if (!classNameInput.trim()) {
         newErrors.className = 'Vui lòng nhập tên lớp học (Ví dụ: 4A1, 7B, 10A2).';
@@ -560,6 +586,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         : Boolean(schoolInput.trim());
       if (!hasSchoolName || !provinceInput.trim() || !districtInput.trim()) {
         newErrors.school = 'Vui lòng nhập/chọn trường, tỉnh/thành và phường/xã.';
+      }
+    }
+
+    // 4. Kiểm tra tên tài khoản đã có người dùng chưa (Đăng ký)
+    if (
+      authMode === 'register' &&
+      !newErrors.username &&
+      isValidUsername(username)
+    ) {
+      try {
+        const available = await isUsernameAvailable(username);
+        if (!available) {
+          newErrors.username = 'Tên tài khoản này đã được sử dụng. Vui lòng chọn tên khác.';
+        }
+      } catch (error) {
+        console.error('USERNAME_AVAILABILITY_CHECK_ERROR:', error);
       }
     }
 
@@ -1801,24 +1843,72 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 )}
 
+                {/* Tên tài khoản (For Register) */}
+                {authMode === 'register' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700">
+                        Tên tài khoản (dùng để đăng nhập): <span className="text-red-500">*</span>
+                      </label>
+                      <span
+                        className={`text-[10px] font-bold ${
+                          isValidUsername(username) ? 'text-emerald-600' : 'text-amber-600'
+                        }`}
+                      >
+                        {isValidUsername(username)
+                          ? '✓ Hợp lệ'
+                          : `Tối thiểu ${USERNAME_MIN_LENGTH} ký tự`}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ví dụ: nguyenben2000"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className={`w-full pl-9 pr-3.5 py-2.5 rounded-xl border text-xs focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 ${
+                          errors.username ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
+                        }`}
+                      />
+                    </div>
+                    {errors.username ? (
+                      <p className="text-[11px] text-red-500 font-semibold mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{errors.username}</span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 font-medium mt-1">
+                        Tên tài khoản không được trùng với người khác. Bạn có thể dùng tên tài khoản hoặc Gmail để đăng nhập.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* 1. Email field (Bắt buộc phải là địa chỉ Gmail @gmail.com, 1 Gmail = 1 tài khoản duy nhất) */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-slate-700">
-                      Địa chỉ Gmail (@gmail.com): <span className="text-red-500">*</span>
+                      {authMode === 'login' ? 'Gmail hoặc Tên tài khoản:' : 'Địa chỉ Gmail (@gmail.com):'}{' '}
+                      <span className="text-red-500">*</span>
                     </label>
                     <span className="text-[10px] text-sky-600 font-semibold">
                       {authMode === 'register'
                         ? 'Mỗi Gmail chỉ tạo được 1 tài khoản duy nhất'
-                        : 'Nhập Gmail đã đăng ký'}
+                        : 'Nhập Gmail hoặc tên tài khoản'}
                     </span>
                   </div>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
-                      type="email"
+                      type={authMode === 'login' ? 'text' : 'email'}
                       required
-                      placeholder="Ví dụ: tenban@gmail.com"
+                      placeholder={
+                        authMode === 'login'
+                          ? 'Ví dụ: tenban@gmail.com hoặc nguyenben2000'
+                          : 'Ví dụ: tenban@gmail.com'
+                      }
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className={`w-full pl-9 pr-3.5 py-2.5 rounded-xl border text-xs focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 ${

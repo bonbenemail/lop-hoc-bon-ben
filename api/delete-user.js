@@ -52,6 +52,16 @@ const deleteTicketsByField = async (db, field, value) => {
   await batch.commit();
 };
 
+// Giải phóng tên tài khoản (username) để có thể dùng lại cho tài khoản khác.
+const deleteUsernamesByUid = async (db, uid) => {
+  if (!uid) return;
+  const snapshot = await db.collection('usernames').where('uid', '==', uid).get();
+  if (snapshot.empty) return;
+  const batch = db.batch();
+  snapshot.docs.forEach((document) => batch.delete(document.ref));
+  await batch.commit();
+};
+
 const deleteRelatedFirestoreData = async (db, uid, email) => {
   await Promise.all([
     deleteSubcollection(db, 'users', uid, 'inbox'),
@@ -59,6 +69,7 @@ const deleteRelatedFirestoreData = async (db, uid, email) => {
     db.collection('userProfiles').doc(uid).delete(),
     deleteTicketsByField(db, 'senderUid', uid),
     deleteTicketsByField(db, 'senderEmail', email),
+    deleteUsernamesByUid(db, uid),
   ]);
 
   // Xóa document chính trong collection users.

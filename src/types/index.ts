@@ -103,6 +103,8 @@ export interface UserAccount {
   firebaseUid?: string;
   fullName: string;
   email: string;
+  /** Tên tài khoản (username) dùng để đăng nhập, tối thiểu 8 ký tự, không trùng nhau. */
+  username?: string;
   phone?: string;
   grade: GradeLevel;
   className?: string;
@@ -176,6 +178,8 @@ export interface SupportTicket {
 export interface FirebaseUserProfile {
   uid: string;
   email: string;
+  /** Tên tài khoản (username) dùng để đăng nhập, tối thiểu 8 ký tự, không trùng nhau. */
+  username?: string;
   fullName: string;
   displayName: string;
   role: UserAccount['role'];

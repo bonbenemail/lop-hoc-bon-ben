@@ -42,7 +42,7 @@ service cloud.firestore {
         request.resource.data.grade >= 1 &&
         request.resource.data.grade <= 12 &&
         request.resource.data.keys().hasOnly([
-          'uid', 'email', 'fullName', 'displayName', 'role', 'grade', 'className',
+          'uid', 'email', 'username', 'fullName', 'displayName', 'role', 'grade', 'className',
           'school', 'schoolLevel', 'provinceOrCity', 'district', 'studentCode',
           'canPracticeAll', 'practiceApprovalStatus', 'teacherApprovalStatus',
           'teacherClassStatus', 'matchedTeacherEmail', 'matchedTeacherName',
@@ -137,6 +137,21 @@ service cloud.firestore {
     match /supportTickets/{ticketId} {
       allow create: if isValidSupportTicket();
       allow get, list, update, delete: if isAdmin();
+    }
+
+    // Bảng ánh xạ tên tài khoản -> tài khoản, phục vụ đăng nhập bằng username.
+    // Cho phép tra cứu công khai (get) vì người dùng cần tra trước khi xác thực.
+    // Mỗi username là 1 document id duy nhất nên tự động chống trùng.
+    match /usernames/{username} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if request.resource.data.username is string &&
+        request.resource.data.uid is string &&
+        request.resource.data.email is string &&
+        ((request.auth != null && request.resource.data.uid == request.auth.uid) || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
     }
   }
 }
