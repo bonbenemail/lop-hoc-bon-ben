@@ -17,7 +17,11 @@ import {
   getMath20LessonsByGrade,
   getEnglish20LessonsByGrade
 } from '../data/practiceLessonsData';
-import { canUserAccessExam } from '../services/schoolManager';
+import {
+  applyLessonOverrides,
+  canUserAccessExam,
+  getConfiguredMascotImage,
+} from '../services/schoolManager';
 
 interface ExamTestModalProps {
   isOpen: boolean;
@@ -49,9 +53,9 @@ export const ExamTestModal: React.FC<ExamTestModalProps> = ({
 
   const isExamAllowed = canUserAccessExam(currentUser || null);
 
-  const vanLessons = getVietnamese20LessonsByGrade(currentGrade);
-  const mathLessons = getMath20LessonsByGrade(currentGrade);
-  const anhLessons = getEnglish20LessonsByGrade(currentGrade);
+  const vanLessons = applyLessonOverrides(getVietnamese20LessonsByGrade(currentGrade));
+  const mathLessons = applyLessonOverrides(getMath20LessonsByGrade(currentGrade));
+  const anhLessons = applyLessonOverrides(getEnglish20LessonsByGrade(currentGrade));
 
   const MULTI_SUBJECT_EXAMS: ExamTest[] = [
     {
@@ -265,7 +269,14 @@ export const ExamTestModal: React.FC<ExamTestModalProps> = ({
                 <div className="space-y-6 py-4 max-w-2xl mx-auto">
                   <div className="text-center space-y-2">
                     <div className="w-16 h-16 mx-auto rounded-3xl overflow-hidden border-2 border-sky-300 shadow-md">
-                      <img src={MASCOT_IMAGE} alt="Bon Ben Exam" className="w-full h-full object-cover" />
+                      <img
+                        src={getConfiguredMascotImage(MASCOT_IMAGE)}
+                        onError={(event) => {
+                          event.currentTarget.src = MASCOT_IMAGE;
+                        }}
+                        alt="Bon Ben Exam"
+                        className="w-full h-full object-cover"
+                      />
                     </div>
                     <h4 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                       Trung Tâm Khảo Thí & Thi Thử Bon Ben Lớp {currentGrade}

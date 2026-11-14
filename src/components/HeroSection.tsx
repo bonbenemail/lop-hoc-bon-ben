@@ -192,7 +192,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               {/* Classroom Photo Card */}
               <div className="relative rounded-3xl overflow-hidden shadow-card-hover border-4 border-white bg-slate-900 group">
                 <img
-                  src={HERO_IMAGE}
+                  src={siteConfig?.heroImageUrl || HERO_IMAGE}
+                  onError={(event) => {
+                    event.currentTarget.src = HERO_IMAGE;
+                  }}
                   alt="Lớp học thông minh Bon Ben"
                   className="w-full h-80 sm:h-96 object-cover transform group-hover:scale-105 transition-transform duration-700"
                 />
@@ -239,7 +242,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               <div className="absolute -bottom-5 -right-3 sm:-right-5 bg-white/95 backdrop-blur-md rounded-2xl p-3 shadow-xl border border-sky-100 flex items-center gap-3 animate-in fade-in slide-in-from-right-4">
                 <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-sky-200">
                   <img
-                    src={MASCOT_IMAGE}
+                    src={siteConfig?.mascotImageUrl || MASCOT_IMAGE}
+                    onError={(event) => {
+                      event.currentTarget.src = MASCOT_IMAGE;
+                    }}
                     alt="Bon Ben Mascot"
                     className="w-full h-full object-cover"
                   />

@@ -13,6 +13,7 @@ import {
   getMath20LessonsByGrade,
   getEnglish20LessonsByGrade
 } from '../data/practiceLessonsData';
+import { applyLessonOverrides, getConfiguredMascotImage } from '../services/schoolManager';
 import { getSubjectRealStats } from '../services/progressTracker';
 
 interface StudentPortfolioModalProps {
@@ -44,9 +45,9 @@ export const StudentPortfolioModal: React.FC<StudentPortfolioModalProps> = ({
   const studentCode = currentUser?.studentCode || `BONBEN-${studentClass}`;
   const userEmail = currentUser?.email || null;
 
-  const vanLessons = getVietnamese20LessonsByGrade(currentGrade);
-  const toanLessons = getMath20LessonsByGrade(currentGrade);
-  const anhLessons = getEnglish20LessonsByGrade(currentGrade);
+  const vanLessons = applyLessonOverrides(getVietnamese20LessonsByGrade(currentGrade));
+  const toanLessons = applyLessonOverrides(getMath20LessonsByGrade(currentGrade));
+  const anhLessons = applyLessonOverrides(getEnglish20LessonsByGrade(currentGrade));
 
   const vanStats = getSubjectRealStats(currentGrade, 'tieng-viet', vanLessons, userEmail);
   const toanStats = getSubjectRealStats(currentGrade, 'toan', toanLessons, userEmail);
@@ -118,7 +119,14 @@ export const StudentPortfolioModal: React.FC<StudentPortfolioModalProps> = ({
         <div className="bg-gradient-to-r from-sky-800 to-blue-800 text-white p-5 sm:p-6 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl overflow-hidden border-2 border-white/80 shadow-md bg-white shrink-0">
-              <img src={currentUser?.avatar || MASCOT_IMAGE} alt={studentName} className="w-full h-full object-cover" />
+              <img
+                src={currentUser?.avatar || getConfiguredMascotImage(MASCOT_IMAGE)}
+                onError={(event) => {
+                  event.currentTarget.src = MASCOT_IMAGE;
+                }}
+                alt={studentName}
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">

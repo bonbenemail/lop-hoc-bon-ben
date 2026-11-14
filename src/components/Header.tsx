@@ -140,7 +140,10 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <div className="w-10 h-10 rounded-2xl overflow-hidden bg-gradient-to-tr from-sky-600 to-blue-500 p-0.5 shadow-sm group-hover:scale-105 transition-transform">
                 <img
-                  src={MASCOT_IMAGE}
+                  src={siteConfig?.mascotImageUrl || MASCOT_IMAGE}
+                  onError={(event) => {
+                    event.currentTarget.src = MASCOT_IMAGE;
+                  }}
                   alt="Lớp học Bon Ben"
                   className="w-full h-full object-cover rounded-[14px]"
                 />

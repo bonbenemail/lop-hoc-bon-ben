@@ -32,7 +32,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigatePage, siteConfig }) =>
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-2xl overflow-hidden border border-sky-400 p-0.5 bg-sky-900">
                 <img
-                  src={MASCOT_IMAGE}
+                  src={siteConfig?.mascotImageUrl || MASCOT_IMAGE}
+                  onError={(event) => {
+                    event.currentTarget.src = MASCOT_IMAGE;
+                  }}
                   alt="Lớp học Bon Ben"
                   className="w-full h-full object-cover rounded-[14px]"
                 />

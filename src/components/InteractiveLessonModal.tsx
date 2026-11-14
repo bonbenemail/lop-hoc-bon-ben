@@ -38,7 +38,8 @@ import {
 import {
   applyLessonOverrides,
   getTeacherCustomAssignments,
-  canUserAccessLesson
+  canUserAccessLesson,
+  getConfiguredMascotImage
 } from '../services/schoolManager';
 
 interface InteractiveLessonModalProps {
@@ -716,7 +717,14 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
 
                 <div className="text-center space-y-3 py-6">
                   <div className="w-24 h-24 mx-auto rounded-3xl overflow-hidden border-2 border-sky-400 shadow-xl">
-                    <img src={MASCOT_IMAGE} alt="Bon Ben" className="w-full h-full object-cover" />
+                    <img
+                      src={getConfiguredMascotImage(MASCOT_IMAGE)}
+                      onError={(event) => {
+                        event.currentTarget.src = MASCOT_IMAGE;
+                      }}
+                      alt="Bon Ben"
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                   <h4 className="text-lg sm:text-xl font-extrabold text-white">
                     {currentLesson.title}

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { GradeLevel, SchoolDirectoryEntry, UserAccount } from '../types';
 import { MASCOT_IMAGE, GRADE_EXERCISE_TYPES } from '../data/bonbenData';
+import { VIETNAM_ADMIN_UNITS } from '../data/vietnamAdministrativeUnits';
 import {
   initAuth,
   googleSignIn,
@@ -46,13 +47,26 @@ import {
   isSameClassAndSchool,
   adminUpdateTeacherApproval,
   adminUpdateStudentPracticePermission,
-  getSchoolDirectory
+  getSchoolDirectory,
+  getConfiguredMascotImage
 } from '../services/schoolManager';
 
 const ADMIN_GMAIL = FIREBASE_ADMIN_EMAIL;
 
-const getSchoolLevelForGrade = (grade: number): SchoolDirectoryEntry['schoolLevel'] =>
+type GradeSchoolLevel = Exclude<SchoolDirectoryEntry['schoolLevel'], 'all'>;
+
+const getSchoolLevelForGrade = (grade: number): GradeSchoolLevel =>
   grade <= 5 ? 'elementary' : grade <= 9 ? 'lower-secondary' : 'upper-secondary';
+
+const getGradesForSchoolLevel = (schoolLevel: GradeSchoolLevel): GradeLevel[] => {
+  if (schoolLevel === 'elementary') return [1, 2, 3, 4, 5];
+  if (schoolLevel === 'lower-secondary') return [6, 7, 8, 9];
+  return [10, 11, 12];
+};
+
+const getFirstGradeForSchoolLevel = (
+  schoolLevel: GradeSchoolLevel
+): GradeLevel => getGradesForSchoolLevel(schoolLevel)[0];
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -101,7 +115,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     currentUser?.className || `${currentUser?.grade || currentGrade}A1`
   );
   const [schoolInput, setSchoolInput] = useState(currentUser?.school || '');
-  const [schoolLevelInput, setSchoolLevelInput] = useState<SchoolDirectoryEntry['schoolLevel']>(
+  const [schoolLevelInput, setSchoolLevelInput] = useState<GradeSchoolLevel>(
     currentUser?.schoolLevel || getSchoolLevelForGrade(currentUser?.grade || currentGrade)
   );
   const [provinceInput, setProvinceInput] = useState(currentUser?.provinceOrCity || '');
@@ -113,7 +127,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [editClassName, setEditClassName] = useState(
     currentUser?.className || `${currentUser?.grade || currentGrade}A1`
   );
-  const [editSchool, setEditSchool] = useState(currentUser?.school || '');
+  const [editSchoolLevel, setEditSchoolLevel] = useState<GradeSchoolLevel>(
+    currentUser?.schoolLevel || getSchoolLevelForGrade(currentUser?.grade || currentGrade)
+  );
+  const [editProvince, setEditProvince] = useState(currentUser?.provinceOrCity || '');
+  const [editDistrict, setEditDistrict] = useState(currentUser?.district || '');
+  const [editSchoolId, setEditSchoolId] = useState('');
   const [profileSavedNotice, setProfileSavedNotice] = useState<string | null>(null);
 
   // Admin Management state (automatically available when logged in with bonbenemail@gmail.com)
@@ -147,6 +166,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const registrationProvince = VIETNAM_ADMIN_UNITS.find((province) => province.name === provinceInput);
+  const profileProvince = VIETNAM_ADMIN_UNITS.find((province) => province.name === editProvince);
 
   // Helper to get registered & Gmail-OTP-verified accounts from localStorage
   const getRegisteredGmailAccounts = (): UserAccount[] => {
@@ -160,11 +181,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       refreshRegisteredStudents();
-      setSchoolDirectory(getSchoolDirectory());
+      const directory = getSchoolDirectory();
+      setSchoolDirectory(directory);
       if (currentUser) {
         setEditGrade(currentUser.grade);
         setEditClassName(currentUser.className || `${currentUser.grade}A1`);
-        setEditSchool(currentUser.school || '');
+        const currentSchool = directory.find(
+          (entry) =>
+            entry.schoolName === currentUser.school &&
+            (entry.schoolLevel === (currentUser.schoolLevel || getSchoolLevelForGrade(currentUser.grade)) ||
+              entry.schoolLevel === 'all') &&
+            entry.provinceOrCity === currentUser.provinceOrCity &&
+            entry.district === currentUser.district
+        );
+        setEditSchoolLevel(currentUser.schoolLevel || getSchoolLevelForGrade(currentUser.grade));
+        setEditProvince(currentUser.provinceOrCity || currentSchool?.provinceOrCity || '');
+        setEditDistrict(currentUser.district || currentSchool?.district || '');
+        setEditSchoolId(currentSchool?.id || (currentUser.school ? '__current__' : ''));
         if (currentUser.role === 'admin' || currentUser.email.toLowerCase() === ADMIN_GMAIL) {
           setAuthMode('admin');
         } else {
@@ -199,6 +232,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSelectedGrade(newGrade);
     setClassNameInput(`${newGrade}A1`);
     setSchoolLevelInput(getSchoolLevelForGrade(newGrade));
+    setProvinceInput('');
+    setDistrictInput('');
+    setSchoolInput('');
+  };
+
+  const handleSchoolLevelChange = (schoolLevel: GradeSchoolLevel) => {
+    setSchoolLevelInput(schoolLevel);
+    const grade = getGradesForSchoolLevel(schoolLevel).includes(selectedGrade)
+      ? selectedGrade
+      : getFirstGradeForSchoolLevel(schoolLevel);
+    setSelectedGrade(grade);
+    setClassNameInput(`${grade}A1`);
     setProvinceInput('');
     setDistrictInput('');
     setSchoolInput('');
@@ -455,7 +500,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const selectedSchool = schoolDirectory.find(
       (entry) =>
         entry.schoolName === cleanSchool &&
-        entry.schoolLevel === schoolLevelInput &&
+        (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
         entry.provinceOrCity === provinceInput &&
         entry.district === districtInput
     );
@@ -489,7 +534,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       grade: selectedGrade,
       className: cleanClass,
       school: cleanSchool,
-      schoolLevel: selectedSchool.schoolLevel,
+      schoolLevel: selectedSchool.schoolLevel === 'all'
+        ? schoolLevelInput
+        : selectedSchool.schoolLevel,
       provinceOrCity: selectedSchool.provinceOrCity,
       district: selectedSchool.district,
       role: finalRole,
@@ -574,7 +621,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         newErrors.className = 'Vui lòng nhập tên lớp học (Ví dụ: 4A1, 7B, 10A2).';
       }
       if (!schoolInput.trim() || !provinceInput.trim() || !districtInput.trim()) {
-        newErrors.school = 'Vui lòng chọn trường, tỉnh/thành và quận/huyện trong danh mục.';
+        newErrors.school = 'Vui lòng chọn trường, tỉnh/thành và phường/xã trong danh mục.';
       }
     }
 
@@ -672,9 +719,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSaveProfileClassAndSchool = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-    if (!editClassName.trim() || !editSchool.trim()) {
+    const selectedSchool = schoolDirectory.find((entry) => entry.id === editSchoolId);
+    const keepCurrentSchool = editSchoolId === '__current__' && Boolean(currentUser.school);
+    if (!editClassName.trim() || (!selectedSchool && !keepCurrentSchool)) {
       setErrors({
-        profileEdit: 'Vui lòng nhập đầy đủ Tên lớp và Tên trường học trước khi lưu.',
+        profileEdit: 'Vui lòng chọn trường trong danh mục cấp phép trước khi lưu.',
       });
       return;
     }
@@ -683,12 +732,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       ...currentUser,
       grade: editGrade,
       className: editClassName.trim(),
-      school: editSchool.trim(),
+      school: selectedSchool?.schoolName || currentUser.school,
+      schoolLevel: selectedSchool
+        ? selectedSchool.schoolLevel === 'all'
+          ? getSchoolLevelForGrade(editGrade)
+          : selectedSchool.schoolLevel
+        : currentUser.schoolLevel,
+      provinceOrCity: selectedSchool?.provinceOrCity || currentUser.provinceOrCity,
+      district: selectedSchool?.district || currentUser.district,
     };
     onUpdateUser(updatedUser);
     refreshRegisteredStudents();
     setProfileSavedNotice(
-      `Đã cập nhật thành công: Khối Lớp ${editGrade} · Lớp ${editClassName.trim()} · Trường ${editSchool.trim()}`
+      `Đã cập nhật thành công: Khối Lớp ${editGrade} · Lớp ${editClassName.trim()} · Trường ${updatedUser.school || ''}`
     );
     setTimeout(() => {
       setProfileSavedNotice(null);
@@ -842,7 +898,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl overflow-hidden border border-sky-400 bg-sky-800 p-0.5 shrink-0">
               <img
-                src={MASCOT_IMAGE}
+                src={getConfiguredMascotImage(MASCOT_IMAGE)}
+                onError={(event) => {
+                  event.currentTarget.src = MASCOT_IMAGE;
+                }}
                 alt="Bon Ben"
                 className="w-full h-full object-cover rounded-[14px]"
               />
@@ -1510,7 +1569,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Cấp học:
+                    </label>
+                    <select
+                      value={editSchoolLevel}
+                      onChange={(event) => {
+                        const level = event.target.value as GradeSchoolLevel;
+                        const grade = getGradesForSchoolLevel(level).includes(editGrade)
+                          ? editGrade
+                          : getFirstGradeForSchoolLevel(level);
+                        setEditSchoolLevel(level);
+                        setEditGrade(grade);
+                        setEditClassName(`${grade}A1`);
+                        setEditProvince('');
+                        setEditDistrict('');
+                        setEditSchoolId('');
+                      }}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-sky-900 bg-white"
+                    >
+                      <option value="elementary">Tiểu học</option>
+                      <option value="lower-secondary">THCS</option>
+                      <option value="upper-secondary">THPT</option>
+                    </select>
+                  </div>
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">
                       Khối lớp hiện tại:
@@ -1521,10 +1605,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         const g = Number(e.target.value) as GradeLevel;
                         setEditGrade(g);
                         setEditClassName(`${g}A1`);
+                        setEditSchoolLevel(getSchoolLevelForGrade(g));
+                        setEditProvince('');
+                        setEditDistrict('');
+                        setEditSchoolId('');
                       }}
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-sky-900 bg-white focus:ring-2 focus:ring-sky-500"
                     >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                      {getGradesForSchoolLevel(editSchoolLevel).map((g) => (
                         <option key={g} value={g}>
                           Khối Lớp {g}
                         </option>
@@ -1549,19 +1637,96 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Trường học đang theo học:
+                    Tỉnh/thành → phường/xã → trường:
                   </label>
-                  <div className="relative">
-                    <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <select
                       required
-                      value={editSchool}
-                      onChange={(e) => setEditSchool(e.target.value)}
-                      placeholder="Ví dụ: Trường Tiểu học / THCS / THPT Chu Văn An"
-                      className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 focus:ring-2 focus:ring-sky-500"
-                    />
+                      value={editProvince}
+                      onChange={(event) => {
+                        setEditProvince(event.target.value);
+                        setEditDistrict('');
+                        setEditSchoolId('');
+                      }}
+                      className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white"
+                    >
+                      <option value="">Chọn tỉnh/thành</option>
+                      {editSchoolId === '__current__' &&
+                        currentUser.provinceOrCity &&
+                        !VIETNAM_ADMIN_UNITS.some((province) => province.name === currentUser.provinceOrCity) &&
+                        !schoolDirectory.some(
+                          (entry) =>
+                            (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
+                            entry.provinceOrCity === currentUser.provinceOrCity
+                        ) && (
+                          <option value={currentUser.provinceOrCity}>
+                            {currentUser.provinceOrCity} (hiện tại)
+                          </option>
+                        )}
+                      {VIETNAM_ADMIN_UNITS.map((province) => (
+                        <option key={province.code} value={province.name}>{province.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      required
+                      value={editDistrict}
+                      disabled={!editProvince}
+                      onChange={(event) => {
+                        setEditDistrict(event.target.value);
+                        setEditSchoolId('');
+                      }}
+                      className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white disabled:bg-slate-100"
+                    >
+                      <option value="">Chọn phường/xã/đặc khu</option>
+                      {editSchoolId === '__current__' &&
+                        currentUser.district &&
+                        !profileProvince?.wards.some((ward) => ward.name === currentUser.district) && (
+                          <option value={currentUser.district}>
+                            {currentUser.district} (hiện tại)
+                          </option>
+                        )}
+                      {profileProvince?.wards.map((ward) => (
+                        <option key={ward.code} value={ward.name}>{ward.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      required
+                      value={editSchoolId}
+                      disabled={!editDistrict}
+                      onChange={(event) => setEditSchoolId(event.target.value)}
+                      className="px-3 py-2.5 rounded-xl border border-slate-200 text-xs bg-white disabled:bg-slate-100"
+                    >
+                      <option value="">Chọn trường</option>
+                      {editSchoolId === '__current__' && currentUser.school && (
+                        <option value="__current__">{currentUser.school} (trường hiện tại)</option>
+                      )}
+                      {schoolDirectory
+                        .filter((entry) =>
+                          (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
+                          entry.provinceOrCity === editProvince &&
+                          entry.district === editDistrict
+                        )
+                        .map((entry) => (
+                          <option key={entry.id} value={entry.id}>{entry.schoolName}</option>
+                        ))}
+                    </select>
                   </div>
+                  {schoolDirectory.length === 0 && (
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      Chưa có trường phù hợp. Vui lòng liên hệ Admin để thêm trường.
+                    </p>
+                  )}
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                    Danh sách nền từ OpenStreetMap chỉ gồm trường có địa chỉ khớp dữ liệu hiện hành nên chưa đầy đủ.{' '}
+                    <a
+                      href="https://www.openstreetmap.org/copyright"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      © OpenStreetMap contributors (ODbL)
+                    </a>
+                  </p>
                 </div>
 
                 <button
@@ -1929,7 +2094,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {/* 3. Phần Lớp (Khối lớp + Tên lớp) & Trường học khi Đăng ký */}
                 {authMode === 'register' && (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1">
+                          Cấp trường:
+                        </label>
+                        <select
+                          value={schoolLevelInput}
+                          onChange={(event) =>
+                            handleSchoolLevelChange(
+                              event.target.value as GradeSchoolLevel
+                            )
+                          }
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-sky-900 bg-white"
+                        >
+                          <option value="elementary">Tiểu học</option>
+                          <option value="lower-secondary">THCS</option>
+                          <option value="upper-secondary">THPT</option>
+                        </select>
+                      </div>
                       <div>
                         <label className="text-xs font-bold text-slate-700 block mb-1">
                           {registerAccountType === 'teacher'
@@ -1946,7 +2129,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             }
                             className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-sky-900 bg-white focus:ring-2 focus:ring-sky-500"
                           >
-                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                            {getGradesForSchoolLevel(schoolLevelInput).map((g) => (
                               <option key={g} value={g}>
                                 Lớp {g}
                               </option>
@@ -1996,9 +2179,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-600 mb-2">
-                        Cấp học được xác định theo khối lớp {selectedGrade}: {schoolLevelInput === 'elementary'
-                          ? 'Tiểu học'
-                          : schoolLevelInput === 'lower-secondary' ? 'THCS' : 'THPT'}.
+                        Danh mục hành chính hiện hành được chọn theo từng tỉnh/thành; danh sách trường sử dụng dữ liệu đã nạp vào hệ thống.
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <select
@@ -2014,10 +2195,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           }`}
                         >
                           <option value="">Chọn tỉnh/thành</option>
-                          {[...new Set(schoolDirectory
-                            .filter((entry) => entry.schoolLevel === schoolLevelInput)
-                            .map((entry) => entry.provinceOrCity))].sort().map((province) => (
-                            <option key={province} value={province}>{province}</option>
+                          {VIETNAM_ADMIN_UNITS.map((province) => (
+                            <option key={province.code} value={province.name}>{province.name}</option>
                           ))}
                         </select>
                         <select
@@ -2032,14 +2211,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
                           }`}
                         >
-                          <option value="">Chọn quận/huyện</option>
-                          {[...new Set(schoolDirectory
-                            .filter((entry) =>
-                              entry.schoolLevel === schoolLevelInput &&
-                              entry.provinceOrCity === provinceInput
-                            )
-                            .map((entry) => entry.district))].sort().map((district) => (
-                            <option key={district} value={district}>{district}</option>
+                          <option value="">Chọn phường/xã/đặc khu</option>
+                          {registrationProvince?.wards.map((ward) => (
+                            <option key={ward.code} value={ward.name}>{ward.name}</option>
                           ))}
                         </select>
                         <select
@@ -2054,7 +2228,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           <option value="">Chọn trường</option>
                           {schoolDirectory
                             .filter((entry) =>
-                              entry.schoolLevel === schoolLevelInput &&
+                              (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
                               entry.provinceOrCity === provinceInput &&
                               entry.district === districtInput
                             )
@@ -2065,9 +2239,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </div>
                       {schoolDirectory.length === 0 && (
                         <p className="text-[11px] text-amber-700 mt-2">
-                          Chưa có trường trong danh mục. Vui lòng liên hệ Admin để thêm trường trước khi đăng ký.
+                          Chưa có trường phù hợp. Vui lòng liên hệ Admin để thêm trường trước khi đăng ký.
                         </p>
                       )}
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Danh sách nền từ OpenStreetMap chưa đầy đủ; nếu không thấy trường, hãy liên hệ Admin.{' '}
+                        <a
+                          href="https://www.openstreetmap.org/copyright"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          © OpenStreetMap contributors (ODbL)
+                        </a>
+                      </p>
                       {errors.school && (
                         <p className="text-[11px] text-red-500 font-semibold mt-1 flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" />

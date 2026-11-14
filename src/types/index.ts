@@ -146,9 +146,12 @@ export interface UserAccount {
 export interface SchoolDirectoryEntry {
   id: string;
   schoolName: string;
-  schoolLevel: 'elementary' | 'lower-secondary' | 'upper-secondary';
+  schoolLevel: 'elementary' | 'lower-secondary' | 'upper-secondary' | 'all';
   provinceOrCity: string;
+  /** Current commune/ward/special-zone name; legacy records may still contain district names. */
   district: string;
+  source?: 'openstreetmap';
+  sourceId?: string;
 }
 
 export interface SiteConfig {
@@ -161,6 +164,8 @@ export interface SiteConfig {
   footerDescription: string;
   supportContactEmailDisplay: string;
   trialLimitCount: number;
+  heroImageUrl?: string;
+  mascotImageUrl?: string;
 }
 
 export interface ExamTest {

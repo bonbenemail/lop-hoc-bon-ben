@@ -21,6 +21,7 @@ import {
   logoutGmail,
   sendSupportEmailViaGmail
 } from '../services/gmailAuth';
+import { getConfiguredMascotImage } from '../services/schoolManager';
 
 interface SupportModalProps {
   isOpen: boolean;
@@ -144,7 +145,10 @@ export const SupportModal: React.FC<SupportModalProps> = ({
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl overflow-hidden border border-sky-400 bg-sky-800 p-0.5 shrink-0">
               <img
-                src={MASCOT_IMAGE}
+                src={getConfiguredMascotImage(MASCOT_IMAGE)}
+                onError={(event) => {
+                  event.currentTarget.src = MASCOT_IMAGE;
+                }}
                 alt="Bon Ben Support"
                 className="w-full h-full object-cover rounded-[14px]"
               />

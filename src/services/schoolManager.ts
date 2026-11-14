@@ -1,5 +1,6 @@
 import { GradeLevel, Lesson, SchoolDirectoryEntry, SiteConfig, UserAccount } from '../types';
 import { shuffleQuestionOptions } from '../utils/answerOptionShuffle';
+import { VIETNAM_OSM_SCHOOLS } from '../data/vietnamOsmSchools';
 
 const ACCOUNTS_KEY = 'bonben_registered_accounts';
 const CURRENT_USER_KEY = 'bonben_user_account';
@@ -15,27 +16,31 @@ export const ADMIN_GMAIL_INTERNAL = 'bonbenemail@gmail.com';
 export const getSchoolDirectory = (): SchoolDirectoryEntry[] => {
   try {
     const raw = localStorage.getItem(SCHOOL_DIRECTORY_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return VIETNAM_OSM_SCHOOLS;
+    const customEntries = parsed.filter(
       (entry): entry is SchoolDirectoryEntry =>
         entry &&
         typeof entry.id === 'string' &&
         typeof entry.schoolName === 'string' &&
         typeof entry.schoolLevel === 'string' &&
-        ['elementary', 'lower-secondary', 'upper-secondary'].includes(entry.schoolLevel) &&
+        ['elementary', 'lower-secondary', 'upper-secondary', 'all'].includes(entry.schoolLevel) &&
         typeof entry.provinceOrCity === 'string' &&
-        typeof entry.district === 'string'
+        typeof entry.district === 'string' &&
+        entry.source !== 'openstreetmap'
     );
+    return [...VIETNAM_OSM_SCHOOLS, ...customEntries];
   } catch (error) {
     console.error('Không thể đọc danh mục trường học:', error);
-    return [];
+    return VIETNAM_OSM_SCHOOLS;
   }
 };
 
 export const saveSchoolDirectory = (entries: SchoolDirectoryEntry[]): void => {
-  localStorage.setItem(SCHOOL_DIRECTORY_KEY, JSON.stringify(entries));
+  localStorage.setItem(
+    SCHOOL_DIRECTORY_KEY,
+    JSON.stringify(entries.filter((entry) => entry.source !== 'openstreetmap'))
+  );
 };
 
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
@@ -449,6 +454,13 @@ export const getSiteConfig = (): SiteConfig => {
   }
 };
 
+export const getConfiguredMascotImage = (fallback: string): string => {
+  const imageUrl = getSiteConfig().mascotImageUrl?.trim();
+  if (!imageUrl) return fallback;
+  if (imageUrl.startsWith('/') && !imageUrl.startsWith('//')) return imageUrl;
+  return /^https:\/\//i.test(imageUrl) ? imageUrl : fallback;
+};
+
 export const saveSiteConfig = (config: SiteConfig): SiteConfig => {
   localStorage.setItem(SITE_CONFIG_KEY, JSON.stringify(config));
   return config;
@@ -464,9 +476,10 @@ export const resetSiteConfig = (): SiteConfig => {
  */
 export interface LessonOverride {
   lessonId: string;
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   difficulty?: 'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao';
+  sampleQuestions?: Lesson['sampleQuestions'];
 }
 
 export const getLessonOverrides = (): Record<string, LessonOverride> => {
@@ -481,7 +494,13 @@ export const getLessonOverrides = (): Record<string, LessonOverride> => {
 
 export const saveLessonOverride = (override: LessonOverride): Record<string, LessonOverride> => {
   const current = getLessonOverrides();
-  const next = { ...current, [override.lessonId]: override };
+  const next = {
+    ...current,
+    [override.lessonId]: {
+      ...current[override.lessonId],
+      ...override,
+    },
+  };
   localStorage.setItem(LESSON_OVERRIDES_KEY, JSON.stringify(next));
   return next;
 };
@@ -493,9 +512,10 @@ export const applyLessonOverrides = (lessons: Lesson[]): Lesson[] => {
     if (!ov) return l;
     return {
       ...l,
-      title: ov.title || l.title,
-      description: ov.description || l.description,
-      difficulty: ov.difficulty || l.difficulty,
+      title: ov.title ?? l.title,
+      description: ov.description ?? l.description,
+      difficulty: ov.difficulty ?? l.difficulty,
+      sampleQuestions: ov.sampleQuestions ?? l.sampleQuestions,
     };
   });
 };

@@ -29,6 +29,7 @@ import {
   resetAllUserProgress,
   LessonProgressRecord
 } from '../services/progressTracker';
+import { applyLessonOverrides, getConfiguredMascotImage } from '../services/schoolManager';
 
 interface AiLearningPathwayProps {
   currentGrade: GradeLevel;
@@ -51,9 +52,9 @@ export const AiLearningPathway: React.FC<AiLearningPathwayProps> = ({
 
   const userEmail = currentUser?.email || null;
 
-  const vanLessons = getVietnamese20LessonsByGrade(currentGrade);
-  const toanLessons = getMath20LessonsByGrade(currentGrade);
-  const anhLessons = getEnglish20LessonsByGrade(currentGrade);
+  const vanLessons = applyLessonOverrides(getVietnamese20LessonsByGrade(currentGrade));
+  const toanLessons = applyLessonOverrides(getMath20LessonsByGrade(currentGrade));
+  const anhLessons = applyLessonOverrides(getEnglish20LessonsByGrade(currentGrade));
 
   const vanStats = getSubjectRealStats(currentGrade, 'tieng-viet', vanLessons, userEmail);
   const toanStats = getSubjectRealStats(currentGrade, 'toan', toanLessons, userEmail);
@@ -451,7 +452,14 @@ export const AiLearningPathway: React.FC<AiLearningPathwayProps> = ({
               
               <div className="flex items-center gap-3.5">
                 <div className="w-13 h-13 rounded-2xl overflow-hidden border-2 border-sky-300 shrink-0 shadow-xs bg-white">
-                  <img src={MASCOT_IMAGE} alt="AI Bon Ben" className="w-full h-full object-cover" />
+                  <img
+                    src={getConfiguredMascotImage(MASCOT_IMAGE)}
+                    onError={(event) => {
+                      event.currentTarget.src = MASCOT_IMAGE;
+                    }}
+                    alt="AI Bon Ben"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div>
                   <div className="text-xs font-bold text-sky-700 flex items-center gap-1">

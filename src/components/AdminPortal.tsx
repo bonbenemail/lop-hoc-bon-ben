@@ -25,7 +25,14 @@ import {
   MapPin,
   Plus
 } from 'lucide-react';
-import { GradeLevel, Lesson, SchoolDirectoryEntry, SiteConfig, UserAccount } from '../types';
+import {
+  GradeLevel,
+  Lesson,
+  QuizQuestion,
+  SchoolDirectoryEntry,
+  SiteConfig,
+  UserAccount,
+} from '../types';
 import {
   getAllRegisteredAccounts,
   saveAllRegisteredAccounts,
@@ -37,13 +44,27 @@ import {
   saveLessonOverride,
   applyLessonOverrides,
   getSchoolDirectory,
-  saveSchoolDirectory
+  saveSchoolDirectory,
+  ADMIN_GMAIL_INTERNAL
 } from '../services/schoolManager';
 import {
   getVietnamese20LessonsByGrade,
   getMath20LessonsByGrade,
   getEnglish20LessonsByGrade
 } from '../data/practiceLessonsData';
+import { GRADE_EXERCISE_TYPES, HERO_IMAGE, MASCOT_IMAGE } from '../data/bonbenData';
+import { VIETNAM_ADMIN_UNITS } from '../data/vietnamAdministrativeUnits';
+
+const isValidImageUrl = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return true;
+  try {
+    return new URL(trimmed).protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 interface AdminPortalProps {
   onSiteConfigChange: (config: SiteConfig) => void;
@@ -72,6 +93,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [newAccountPassword, setNewAccountPassword] = useState('');
   const [newAccountGrade, setNewAccountGrade] = useState<GradeLevel>(4);
   const [newAccountClass, setNewAccountClass] = useState('4A1');
+  const [newAccountProvince, setNewAccountProvince] = useState('');
+  const [newAccountDistrict, setNewAccountDistrict] = useState('');
   const [newAccountSchoolId, setNewAccountSchoolId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'student' | 'teacher' | 'school'>('all');
@@ -83,10 +106,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editingInfoEmail, setEditingInfoEmail] = useState<string | null>(null);
   const [editGrade, setEditGrade] = useState<GradeLevel>(4);
   const [editClass, setEditClass] = useState('');
-  const [editSchool, setEditSchool] = useState('');
+  const [editSchoolId, setEditSchoolId] = useState('');
   const [editSchoolLevel, setEditSchoolLevel] = useState<SchoolDirectoryEntry['schoolLevel']>('elementary');
   const [editProvince, setEditProvince] = useState('');
   const [editDistrict, setEditDistrict] = useState('');
+  const [editRole, setEditRole] = useState<'student' | 'teacher' | 'school'>('student');
+  const [editFullName, setEditFullName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAvatar, setEditAvatar] = useState('');
+  const [editDiamonds, setEditDiamonds] = useState('0');
+  const [editLevel, setEditLevel] = useState('1');
+  const [editStudentCode, setEditStudentCode] = useState('');
   const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
   const [showPassMap, setShowPassMap] = useState<Record<string, boolean>>({});
 
@@ -98,6 +128,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editLessonTitle, setEditLessonTitle] = useState('');
   const [editLessonDesc, setEditLessonDesc] = useState('');
   const [editLessonDiff, setEditLessonDiff] = useState<'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao'>('Cơ bản');
+  const [editLessonQuestions, setEditLessonQuestions] = useState<QuizQuestion[]>([]);
 
   const reloadAccounts = () => {
     setAccounts(getAllRegisteredAccounts());
@@ -134,7 +165,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   const handleApproveAllPendingTeachers = () => {
-    const updated = accounts.map((acc) =>
+    const updated = accounts.map((acc): UserAccount =>
       acc.role === 'teacher' ? { ...acc, teacherApprovalStatus: 'approved' as const } : acc
     );
     saveAllRegisteredAccounts(updated);
@@ -173,7 +204,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify('⚠️ Mật khẩu mới phải có nhiều hơn 6 ký tự (từ 7 ký tự trở lên).');
       return;
     }
-    const updated = accounts.map((acc) =>
+    const updated = accounts.map((acc): UserAccount =>
       acc.email.toLowerCase() === targetEmail.toLowerCase()
         ? { ...acc, password: newPasswordInput }
         : acc
@@ -188,20 +219,70 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Sửa Lớp & Trường
   const handleSaveAccountInfo = (targetEmail: string) => {
-    if (!editClass.trim() || !editSchool.trim()) {
-      notify('⚠️ Vui lòng nhập đầy đủ Lớp và Trường.');
+    const targetAccount = accounts.find(
+      (acc) => acc.email.toLowerCase() === targetEmail.toLowerCase()
+    );
+    if (!targetAccount) {
+      notify('⚠️ Không tìm thấy tài khoản cần cập nhật. Hãy tải lại danh sách.');
       return;
     }
-    const updated = accounts.map((acc) =>
+    const selectedSchool = schoolDirectory.find((entry) => entry.id === editSchoolId);
+    const diamonds = Number(editDiamonds);
+    const level = Number(editLevel);
+    if (!editFullName.trim() || (!editClass.trim() && editRole !== 'school') || !selectedSchool) {
+      notify('⚠️ Vui lòng nhập họ tên, lớp phù hợp và chọn trường trong danh mục Admin cấp.');
+      return;
+    }
+    if (!Number.isInteger(diamonds) || diamonds < 0 || !Number.isInteger(level) || level < 1) {
+      notify('⚠️ Kim cương phải từ 0 và cấp độ phải là số nguyên từ 1 trở lên.');
+      return;
+    }
+    if (!isValidImageUrl(editAvatar)) {
+      notify('⚠️ Ảnh đại diện cần là URL HTTPS hoặc đường dẫn bắt đầu bằng dấu /.');
+      return;
+    }
+    const updated = accounts.map((acc): UserAccount =>
       acc.email.toLowerCase() === targetEmail.toLowerCase()
         ? {
             ...acc,
+            role: editRole,
+            fullName: editFullName.trim(),
+            phone: editPhone.trim() || undefined,
+            avatar: editAvatar.trim() || undefined,
             grade: editGrade,
             className: editClass.trim().toUpperCase(),
-            school: editSchool.trim(),
-            schoolLevel: editSchoolLevel,
-            provinceOrCity: editProvince.trim(),
-            district: editDistrict.trim(),
+            school: selectedSchool.schoolName,
+            schoolLevel: selectedSchool.schoolLevel === 'all'
+              ? editGrade <= 5
+                ? 'elementary'
+                : editGrade <= 9
+                  ? 'lower-secondary'
+                  : 'upper-secondary'
+              : selectedSchool.schoolLevel,
+            provinceOrCity: selectedSchool.provinceOrCity,
+            district: selectedSchool.district,
+            diamonds,
+            level,
+            studentCode: editStudentCode.trim() || acc.studentCode,
+            canPracticeAll:
+              editRole === 'student'
+                ? acc.role === 'student' && acc.canPracticeAll === true
+                : true,
+            practiceApprovalStatus:
+              editRole === 'student'
+                ? acc.role === 'student' && acc.canPracticeAll === true
+                  ? 'approved'
+                  : 'pending'
+                : 'approved',
+            teacherApprovalStatus:
+              editRole === 'teacher'
+                ? acc.role === 'teacher'
+                  ? acc.teacherApprovalStatus || 'pending'
+                  : 'pending'
+                : undefined,
+            teacherClassStatus: editRole === 'student' ? acc.teacherClassStatus || 'none' : 'none',
+            matchedTeacherEmail: editRole === 'student' ? acc.matchedTeacherEmail : undefined,
+            matchedTeacherName: editRole === 'student' ? acc.matchedTeacherName : undefined,
           }
         : acc
     );
@@ -209,7 +290,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     reloadAccounts();
     setEditingInfoEmail(null);
     onAccountsChange();
-    notify('✅ Đã cập nhật Lớp & Trường cho tài khoản!');
+    notify('✅ Đã cập nhật hồ sơ và thông tin trường cho tài khoản!');
   };
 
   const handleAddSchoolDirectoryEntry = (event: React.FormEvent) => {
@@ -217,8 +298,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const schoolName = directorySchoolName.trim();
     const provinceOrCity = directoryProvince.trim();
     const district = directoryDistrict.trim();
-    if (!schoolName || !provinceOrCity || !district) {
-      notify('⚠️ Vui lòng nhập tên trường, tỉnh/thành và quận/huyện.');
+    const province = VIETNAM_ADMIN_UNITS.find((entry) => entry.name === provinceOrCity);
+    if (!schoolName || !province || !province.wards.some((ward) => ward.name === district)) {
+      notify('⚠️ Chọn tỉnh/thành, phường/xã hợp lệ và nhập tên trường.');
       return;
     }
 
@@ -251,6 +333,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   const handleDeleteSchoolDirectoryEntry = (entryId: string) => {
+    const target = schoolDirectory.find((entry) => entry.id === entryId);
+    if (!target) {
+      notify('⚠️ Không tìm thấy trường trong danh mục.');
+      return;
+    }
+    if (target.source === 'openstreetmap') {
+      notify('⚠️ Trường lấy từ OpenStreetMap; không thể xóa khỏi dữ liệu nền.');
+      return;
+    }
+    const linkedAccounts = accounts.filter(
+      (account) =>
+        account.school === target.schoolName &&
+        account.schoolLevel === target.schoolLevel &&
+        account.provinceOrCity === target.provinceOrCity &&
+        account.district === target.district
+    );
+    if (linkedAccounts.length > 0) {
+      notify(`⚠️ Trường đang được dùng bởi ${linkedAccounts.length} tài khoản. Hãy chuyển các tài khoản đó sang trường khác trước khi xóa.`);
+      return;
+    }
     const next = schoolDirectory.filter((entry) => entry.id !== entryId);
     saveSchoolDirectory(next);
     setSchoolDirectoryState(next);
@@ -268,6 +370,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify('⚠️ Nhập họ tên, Gmail hợp lệ và khối/lớp nếu tạo tài khoản học sinh hoặc giáo viên.');
       return;
     }
+    if (email === ADMIN_GMAIL_INTERNAL) {
+      notify('⚠️ Email Admin được dành riêng cho tài khoản Firebase, không thể tạo tài khoản cục bộ.');
+      return;
+    }
     if (newAccountPassword.length <= 6) {
       notify('⚠️ Mật khẩu phải có ít nhất 7 ký tự.');
       return;
@@ -278,7 +384,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
 
     const school = schoolDirectory.find((entry) => entry.id === newAccountSchoolId);
-    if (!school) {
+    if (
+      !school ||
+      school.provinceOrCity !== newAccountProvince ||
+      school.district !== newAccountDistrict
+    ) {
       notify('⚠️ Hãy chọn trường đã được thêm vào danh mục.');
       return;
     }
@@ -292,7 +402,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       grade: newAccountGrade,
       className: newAccountRole === 'school' ? '' : newAccountClass.trim().toUpperCase(),
       school: school.schoolName,
-      schoolLevel: school.schoolLevel,
+      schoolLevel: school.schoolLevel === 'all'
+        ? newAccountGrade <= 5
+          ? 'elementary'
+          : newAccountGrade <= 9
+            ? 'lower-secondary'
+            : 'upper-secondary'
+        : school.schoolLevel,
       provinceOrCity: school.provinceOrCity,
       district: school.district,
       role: newAccountRole,
@@ -303,6 +419,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       diamonds: 0,
       level: 1,
       studentCode: `${newAccountRole === 'school' ? 'TRUONG' : newAccountRole === 'teacher' ? 'GV' : 'HS'}-${newAccountRole === 'school' ? 'TK' : newAccountClass.trim().toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
+      selectedExerciseTypes: (
+        GRADE_EXERCISE_TYPES[newAccountGrade] || GRADE_EXERCISE_TYPES[4]
+      ).map((exerciseType) => exerciseType.id),
       createdAt: new Date().toISOString(),
     };
 
@@ -313,6 +432,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setNewAccountName('');
     setNewAccountEmail('');
     setNewAccountPassword('');
+    setNewAccountProvince('');
+    setNewAccountDistrict('');
     setNewAccountSchoolId('');
     notify(`✅ Đã tạo tài khoản ${newAccountRole === 'school' ? 'nhà trường' : newAccountRole === 'teacher' ? 'giáo viên' : 'học sinh'}.`);
   };
@@ -332,9 +453,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Lưu chỉnh sửa trực tiếp giao diện trang web
   const handleSaveSiteConfig = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidImageUrl(siteConfig.heroImageUrl || '') || !isValidImageUrl(siteConfig.mascotImageUrl || '')) {
+      notify('⚠️ Ảnh cần dùng URL HTTPS hoặc đường dẫn bắt đầu bằng dấu /.');
+      return;
+    }
     const saved = saveSiteConfig(siteConfig);
     onSiteConfigChange(saved);
-    notify('✅ Đã lưu chỉnh sửa trực tiếp nội dung trang web thành công!');
+    notify('✅ Đã lưu nội dung trang web trên trình duyệt này!');
   };
 
   const handleResetSiteConfig = () => {
@@ -354,16 +479,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const lessonsForEditor = applyLessonOverrides(rawLessonsForEditor);
 
   const handleSaveLessonDirectEdit = (lessonId: string) => {
-    if (!editLessonTitle.trim()) return;
+    if (!editLessonTitle.trim()) {
+      notify('⚠️ Tên bài luyện không được để trống.');
+      return;
+    }
+    const invalidQuestionIndex = editLessonQuestions.findIndex(
+      (question) =>
+        !question.question.trim() ||
+        question.options.length !== 4 ||
+        question.options.some((option) => !option.trim()) ||
+        !Number.isInteger(question.correctIndex) ||
+        question.correctIndex < 0 ||
+        question.correctIndex >= question.options.length ||
+        !Number.isFinite(question.points) ||
+        question.points <= 0
+    );
+    if (invalidQuestionIndex >= 0) {
+      notify(`⚠️ Câu ${invalidQuestionIndex + 1} cần có nội dung, đủ 4 lựa chọn và đáp án đúng hợp lệ.`);
+      return;
+    }
     saveLessonOverride({
       lessonId,
       title: editLessonTitle.trim(),
       description: editLessonDesc.trim(),
       difficulty: editLessonDiff,
+      sampleQuestions: editLessonQuestions,
     });
     setEditingLessonId(null);
     onAccountsChange();
-    notify('✅ Đã cập nhật trực tiếp nội dung bài luyện trên trang web!');
+    notify('✅ Đã lưu bài luyện và ngân hàng câu hỏi trên trình duyệt này!');
   };
 
   const filteredAccounts = accounts.filter((acc) => {
@@ -378,7 +522,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     return matchRole && matchSearch;
   });
   const schoolLevelLabel = (level?: SchoolDirectoryEntry['schoolLevel']) =>
-    level === 'elementary' ? 'Tiểu học' : level === 'lower-secondary' ? 'THCS' : 'THPT';
+    level === 'elementary'
+      ? 'Tiểu học'
+      : level === 'lower-secondary'
+        ? 'THCS'
+        : level === 'upper-secondary'
+          ? 'THPT'
+          : 'Chưa rõ cấp';
 
   return (
     <section className="py-8 sm:py-10 px-4 sm:px-6 max-w-7xl mx-auto space-y-6">
@@ -400,6 +550,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </h1>
             <p className="text-xs sm:text-sm text-sky-200 max-w-2xl leading-relaxed">
               Tài khoản Admin chuyên biệt dùng để xét duyệt Giáo viên, cấp/khóa quyền làm bài luyện & bài thi của Học sinh, quản lý toàn bộ tài khoản và chỉnh sửa trực tiếp nội dung trang web.
+            </p>
+            <p className="text-[11px] text-amber-200 max-w-2xl">
+              Bản hiện tại lưu thay đổi trong localStorage của trình duyệt này; chưa đồng bộ sang thiết bị/người dùng khác hoặc lưu an toàn ở máy chủ.
             </p>
           </div>
 
@@ -1078,10 +1231,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             setEditingInfoEmail(isEditingInfo ? null : emailKey);
                             setEditGrade(acc.grade);
                             setEditClass(acc.className || `${acc.grade}A1`);
-                            setEditSchool(acc.school || '');
                             setEditSchoolLevel(acc.schoolLevel || 'elementary');
                             setEditProvince(acc.provinceOrCity || '');
                             setEditDistrict(acc.district || '');
+                            const matchingSchool = schoolDirectory.find(
+                              (entry) =>
+                                entry.schoolName === acc.school &&
+                                (entry.schoolLevel === (acc.schoolLevel || 'elementary') ||
+                                  entry.schoolLevel === 'all') &&
+                                entry.provinceOrCity === acc.provinceOrCity &&
+                                entry.district === acc.district
+                            );
+                            setEditSchoolId(matchingSchool?.id || '');
+                            setEditRole(acc.role === 'teacher' || acc.role === 'school' ? acc.role : 'student');
+                            setEditFullName(acc.fullName);
+                            setEditPhone(acc.phone || '');
+                            setEditAvatar(acc.avatar || '');
+                            setEditDiamonds(String(acc.diamonds ?? 0));
+                            setEditLevel(String(acc.level ?? 1));
+                            setEditStudentCode(acc.studentCode);
                             setEditingPasswordEmail(null);
                           }}
                           className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
@@ -1115,67 +1283,216 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </div>
 
                     {isEditingInfo && (
-                      <div className="p-3 rounded-xl bg-white border border-sky-200 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <select
-                          value={editGrade}
-                          onChange={(e) => {
-                            const g = Number(e.target.value) as GradeLevel;
-                            setEditGrade(g);
-                            setEditClass(`${g}A1`);
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold"
-                        >
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
-                            <option key={g} value={g}>
-                              Khối {g}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          value={editClass}
-                          onChange={(e) => setEditClass(e.target.value)}
-                          placeholder="Tên lớp (VD: 4A1)"
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
-                        <input
-                          type="text"
-                          value={editSchool}
-                          onChange={(e) => setEditSchool(e.target.value)}
-                          placeholder="Tên trường..."
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
-                        <select
-                          value={editSchoolLevel}
-                          onChange={(event) =>
-                            setEditSchoolLevel(event.target.value as SchoolDirectoryEntry['schoolLevel'])
-                          }
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        >
-                          <option value="elementary">Tiểu học</option>
-                          <option value="lower-secondary">THCS</option>
-                          <option value="upper-secondary">THPT</option>
-                        </select>
-                        <input
-                          type="text"
-                          value={editProvince}
-                          onChange={(event) => setEditProvince(event.target.value)}
-                          placeholder="Tỉnh/thành"
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
-                        <input
-                          type="text"
-                          value={editDistrict}
-                          onChange={(event) => setEditDistrict(event.target.value)}
-                          placeholder="Quận/huyện"
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
+                      <div className="p-3 rounded-xl bg-white border border-sky-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Loại tài khoản
+                          <select
+                            value={editRole}
+                            onChange={(event) => {
+                              const nextRole = event.target.value as 'student' | 'teacher' | 'school';
+                              setEditRole(nextRole);
+                              if (nextRole === 'school') {
+                                setEditClass('');
+                              } else if (!editClass.trim()) {
+                                setEditClass(`${editGrade}A1`);
+                              }
+                            }}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                          >
+                            <option value="student">Học sinh</option>
+                            <option value="teacher">Giáo viên</option>
+                            <option value="school">Nhà trường</option>
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Họ và tên
+                          <input
+                            type="text"
+                            value={editFullName}
+                            onChange={(event) => setEditFullName(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Số điện thoại
+                          <input
+                            type="tel"
+                            value={editPhone}
+                            onChange={(event) => setEditPhone(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        {editRole !== 'school' && (
+                          <label className="text-[11px] font-bold text-slate-600">
+                            Khối
+                            <select
+                              value={editGrade}
+                              onChange={(e) => {
+                                const g = Number(e.target.value) as GradeLevel;
+                                const schoolLevel = g <= 5
+                                  ? 'elementary'
+                                  : g <= 9
+                                    ? 'lower-secondary'
+                                    : 'upper-secondary';
+                                setEditGrade(g);
+                                setEditClass(`${g}A1`);
+                                if (schoolLevel !== editSchoolLevel) {
+                                  setEditSchoolLevel(schoolLevel);
+                                  setEditProvince('');
+                                  setEditDistrict('');
+                                  setEditSchoolId('');
+                                }
+                              }}
+                              className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold"
+                            >
+                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                                <option key={g} value={g}>Khối {g}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {editRole !== 'school' && (
+                          <label className="text-[11px] font-bold text-slate-600">
+                            Lớp
+                            <input
+                              type="text"
+                              value={editClass}
+                              onChange={(e) => setEditClass(e.target.value)}
+                              placeholder="Tên lớp (VD: 4A1)"
+                              className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-normal"
+                            />
+                          </label>
+                        )}
+                        <label className="text-[11px] font-bold text-slate-600">
+                          URL ảnh đại diện (HTTPS)
+                          <input
+                            type="text"
+                            inputMode="url"
+                            value={editAvatar}
+                            onChange={(event) => setEditAvatar(event.target.value)}
+                            placeholder="https://..."
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Mã học sinh/giáo viên
+                          <input
+                            type="text"
+                            value={editStudentCode}
+                            onChange={(event) => setEditStudentCode(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Kim cương
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={editDiamonds}
+                            onChange={(event) => setEditDiamonds(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Cấp độ
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={editLevel}
+                            onChange={(event) => setEditLevel(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Cấp trường
+                          <select
+                            value={editSchoolLevel}
+                            onChange={(event) => {
+                              setEditSchoolLevel(event.target.value as SchoolDirectoryEntry['schoolLevel']);
+                              setEditProvince('');
+                              setEditDistrict('');
+                              setEditSchoolId('');
+                            }}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                          >
+                            <option value="elementary">Tiểu học</option>
+                            <option value="lower-secondary">THCS</option>
+                            <option value="upper-secondary">THPT</option>
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Tỉnh/Thành
+                          <select
+                            value={editProvince}
+                            onChange={(event) => {
+                              setEditProvince(event.target.value);
+                              setEditDistrict('');
+                              setEditSchoolId('');
+                            }}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+                          >
+                            <option value="">Chọn tỉnh/thành</option>
+                            {editProvince && !VIETNAM_ADMIN_UNITS.some((province) => province.name === editProvince) && (
+                              <option value={editProvince}>{editProvince} (dữ liệu cũ)</option>
+                            )}
+                            {VIETNAM_ADMIN_UNITS.map((province) => (
+                              <option key={province.code} value={province.name}>{province.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Phường/Xã/Đặc khu
+                          <select
+                            value={editDistrict}
+                            disabled={!editProvince}
+                            onChange={(event) => {
+                              setEditDistrict(event.target.value);
+                              setEditSchoolId('');
+                            }}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white disabled:bg-slate-100"
+                          >
+                            <option value="">Chọn phường/xã/đặc khu</option>
+                            {editDistrict &&
+                              !VIETNAM_ADMIN_UNITS
+                                .find((province) => province.name === editProvince)
+                                ?.wards.some((ward) => ward.name === editDistrict) && (
+                                <option value={editDistrict}>{editDistrict} (dữ liệu cũ)</option>
+                              )}
+                            {VIETNAM_ADMIN_UNITS
+                              .find((province) => province.name === editProvince)
+                              ?.wards.map((ward) => (
+                                <option key={ward.code} value={ward.name}>{ward.name}</option>
+                              ))}
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Trường đầy đủ
+                          <select
+                            value={editSchoolId}
+                            disabled={!editDistrict}
+                            onChange={(event) => setEditSchoolId(event.target.value)}
+                            className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white disabled:bg-slate-100"
+                          >
+                            <option value="">Chọn trường đã cấp</option>
+                            {schoolDirectory
+                              .filter((entry) =>
+                                (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
+                                entry.provinceOrCity === editProvince &&
+                                entry.district === editDistrict
+                              )
+                              .map((entry) => (
+                                <option key={entry.id} value={entry.id}>{entry.schoolName}</option>
+                              ))}
+                          </select>
+                        </label>
                         <button
                           type="button"
                           onClick={() => handleSaveAccountInfo(acc.email)}
-                          className="px-3 py-1.5 bg-sky-600 text-white font-extrabold text-xs rounded-lg cursor-pointer"
+                          className="px-3 py-1.5 bg-sky-600 text-white font-extrabold text-xs rounded-lg cursor-pointer self-end"
                         >
-                          Lưu Lớp & Trường
+                          Lưu hồ sơ
                         </button>
                       </div>
                     )}
@@ -1183,7 +1500,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     {isEditingPass && (
                       <div className="p-3 rounded-xl bg-white border border-amber-200 flex flex-col sm:flex-row gap-2">
                         <input
-                          type="text"
+                          type="password"
                           value={newPasswordInput}
                           onChange={(e) => setNewPasswordInput(e.target.value)}
                           placeholder="Nhập mật khẩu mới (> 6 ký tự)..."
@@ -1252,7 +1569,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 onChange={(event) =>
                   setNewAccountRole(event.target.value as 'student' | 'teacher' | 'school')
                 }
-                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
               >
                 <option value="school">Nhà trường (chỉ Admin tạo)</option>
                 <option value="teacher">Giáo viên</option>
@@ -1260,17 +1577,68 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </select>
             </label>
             <label className="text-xs font-bold text-slate-700">
-              Trường đã được cấp
+              Tỉnh/Thành
+              <select
+                required
+                value={newAccountProvince}
+                onChange={(event) => {
+                  setNewAccountProvince(event.target.value);
+                  setNewAccountDistrict('');
+                  setNewAccountSchoolId('');
+                }}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+              >
+                <option value="">Chọn tỉnh/thành</option>
+                {VIETNAM_ADMIN_UNITS.map((province) => (
+                  <option key={province.code} value={province.name}>{province.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Phường/Xã/Đặc khu
+              <select
+                required
+                value={newAccountDistrict}
+                disabled={!newAccountProvince}
+                onChange={(event) => {
+                  setNewAccountDistrict(event.target.value);
+                  setNewAccountSchoolId('');
+                }}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
+              >
+                <option value="">Chọn phường/xã/đặc khu</option>
+                {VIETNAM_ADMIN_UNITS
+                  .find((province) => province.name === newAccountProvince)
+                  ?.wards.map((ward) => (
+                    <option key={ward.code} value={ward.name}>{ward.name}</option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Trường trong khu vực đã chọn
               <select
                 required
                 value={newAccountSchoolId}
                 onChange={(event) => setNewAccountSchoolId(event.target.value)}
+                disabled={!newAccountDistrict}
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
               >
                 <option value="">Chọn trường</option>
-                {schoolDirectory.map((school) => (
+                {schoolDirectory
+                  .filter((school) =>
+                    school.provinceOrCity === newAccountProvince &&
+                    school.district === newAccountDistrict &&
+                    (newAccountRole === 'school' ||                     (school.schoolLevel === 'all' || school.schoolLevel === (
+                      newAccountGrade <= 5
+                        ? 'elementary'
+                        : newAccountGrade <= 9
+                          ? 'lower-secondary'
+                          : 'upper-secondary'
+                    )))
+                  )
+                  .map((school) => (
                   <option key={school.id} value={school.id}>
-                    {schoolLevelLabel(school.schoolLevel)} · {school.schoolName} · {school.district}, {school.provinceOrCity}
+                    {school.schoolName}
                   </option>
                 ))}
               </select>
@@ -1315,6 +1683,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       const grade = Number(event.target.value) as GradeLevel;
                       setNewAccountGrade(grade);
                       setNewAccountClass(`${grade}A1`);
+                      setNewAccountSchoolId('');
                     }}
                     className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
                   >
@@ -1355,7 +1724,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div>
               <h2 className="text-lg font-extrabold text-slate-900">Cấp trường/khu vực đăng ký</h2>
               <p className="text-xs text-slate-600 mt-1">
-                Học sinh, giáo viên chỉ chọn trường đã được Admin thêm; không cần tự gõ tên trường.
+                Học sinh, giáo viên chọn trường từ dữ liệu nền hoặc danh mục Admin bổ sung; không cần tự gõ tên trường.
               </p>
             </div>
             <label className="block text-xs font-bold text-slate-700">
@@ -1374,23 +1743,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </label>
             <label className="block text-xs font-bold text-slate-700">
               Tỉnh/Thành phố
-              <input
+              <select
                 required
                 value={directoryProvince}
-                onChange={(event) => setDirectoryProvince(event.target.value)}
-                placeholder="Ví dụ: TP. Hồ Chí Minh"
-                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200"
-              />
+                onChange={(event) => {
+                  setDirectoryProvince(event.target.value);
+                  setDirectoryDistrict('');
+                }}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+              >
+                <option value="">Chọn tỉnh/thành</option>
+                {VIETNAM_ADMIN_UNITS.map((province) => (
+                  <option key={province.code} value={province.name}>{province.name}</option>
+                ))}
+              </select>
             </label>
             <label className="block text-xs font-bold text-slate-700">
-              Quận/Huyện/Thị xã
-              <input
+              Phường/Xã/Đặc khu
+              <select
                 required
                 value={directoryDistrict}
+                disabled={!directoryProvince}
                 onChange={(event) => setDirectoryDistrict(event.target.value)}
-                placeholder="Khu vực"
-                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200"
-              />
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
+              >
+                <option value="">Chọn phường/xã/đặc khu</option>
+                {VIETNAM_ADMIN_UNITS
+                  .find((province) => province.name === directoryProvince)
+                  ?.wards.map((ward) => (
+                    <option key={ward.code} value={ward.name}>{ward.name}</option>
+                  ))}
+              </select>
             </label>
             <label className="block text-xs font-bold text-slate-700">
               Tên trường đầy đủ
@@ -1409,6 +1792,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
           <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-3">
             <h3 className="font-extrabold text-slate-900">Danh sách trường đã cấp ({schoolDirectory.length})</h3>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Có {schoolDirectory.filter((entry) => entry.source === 'openstreetmap').length} mục từ OpenStreetMap. Danh mục này chưa đầy đủ vì chỉ giữ trường có địa chỉ khớp dữ liệu hành chính hiện hành; Admin có thể bổ sung trường còn thiếu.{' '}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                © OpenStreetMap contributors (ODbL)
+              </a>
+            </p>
             {schoolDirectory.length === 0 ? (
               <p className="p-5 rounded-2xl bg-slate-50 text-xs text-slate-600">
                 Chưa có trường. Thêm trường để bật lựa chọn khi đăng ký/tạo tài khoản.
@@ -1420,14 +1814,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     <div className="text-xs">
                       <p className="font-bold text-slate-900">{entry.schoolName}</p>
                       <p className="text-slate-600">{schoolLevelLabel(entry.schoolLevel)} · {entry.district}, {entry.provinceOrCity}</p>
+                      {entry.source === 'openstreetmap' && (
+                        <p className="text-[10px] text-slate-500">Nguồn dữ liệu nền: OpenStreetMap</p>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSchoolDirectoryEntry(entry.id)}
-                      className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-bold"
-                    >
-                      Xóa
-                    </button>
+                    {entry.source === 'openstreetmap' ? (
+                      <span className="text-[10px] text-slate-500">Dữ liệu nền</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSchoolDirectoryEntry(entry.id)}
+                        className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-bold"
+                      >
+                        Xóa
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1447,7 +1848,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   Sửa Trực Tiếp Giao Diện & Nội Dung Trang Web
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Mọi thay đổi được áp dụng trực tiếp lên Trang chủ, Thanh điều hướng và Chân trang.
+                  Nội dung và hình ảnh áp dụng trên trình duyệt hiện tại cho Trang chủ, Thanh điều hướng và Chân trang.
                 </p>
               </div>
               <button
@@ -1553,6 +1954,71 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 />
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-100 pt-3">
+                <label className="text-xs font-bold text-slate-700">
+                  URL ảnh bìa trang chủ (HTTPS hoặc /public-path):
+                  <input
+                    type="text"
+                    inputMode="url"
+                    value={siteConfig.heroImageUrl || ''}
+                    onChange={(event) =>
+                      setSiteConfig({ ...siteConfig, heroImageUrl: event.target.value })
+                    }
+                    placeholder="https://.../anh-bia.jpg"
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-normal"
+                  />
+                  <img
+                    src={siteConfig.heroImageUrl || HERO_IMAGE}
+                    onError={(event) => {
+                      event.currentTarget.src = HERO_IMAGE;
+                    }}
+                    alt="Xem trước ảnh bìa"
+                    className="mt-2 h-24 w-full rounded-xl object-cover border border-slate-200"
+                  />
+                </label>
+                <label className="text-xs font-bold text-slate-700">
+                  URL ảnh mascot/logo (HTTPS hoặc /public-path):
+                  <input
+                    type="text"
+                    inputMode="url"
+                    value={siteConfig.mascotImageUrl || ''}
+                    onChange={(event) =>
+                      setSiteConfig({ ...siteConfig, mascotImageUrl: event.target.value })
+                    }
+                    placeholder="https://.../mascot.png"
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-normal"
+                  />
+                  <img
+                    src={siteConfig.mascotImageUrl || MASCOT_IMAGE}
+                    onError={(event) => {
+                      event.currentTarget.src = MASCOT_IMAGE;
+                    }}
+                    alt="Xem trước ảnh mascot"
+                    className="mt-2 h-24 w-full rounded-xl object-cover border border-slate-200"
+                  />
+                </label>
+                <p className="sm:col-span-2 text-[11px] text-slate-500">
+                  Dùng liên kết ảnh HTTPS công khai hoặc đặt tệp trong thư mục public rồi nhập đường dẫn bắt đầu bằng /. Các thay đổi lưu trên trình duyệt này.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">
+                  Email hiển thị hỗ trợ:
+                  <input
+                    type="email"
+                    value={siteConfig.supportContactEmailDisplay}
+                    onChange={(event) =>
+                      setSiteConfig({
+                        ...siteConfig,
+                        supportContactEmailDisplay: event.target.value,
+                      })
+                    }
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-normal"
+                  />
+                </label>
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-sm flex items-center justify-center gap-2 cursor-pointer"
@@ -1570,7 +2036,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 Sửa Trực Tiếp 60 Bài Luyện Theo Khối Lớp
               </h3>
               <p className="text-xs text-slate-500">
-                Chọn khối lớp và môn học để sửa trực tiếp tên bài luyện, mô tả hoặc mức độ hiển thị trên web.
+                Chọn khối lớp và môn học để sửa tên bài, mô tả, độ khó và toàn bộ câu hỏi/đáp án.
               </p>
             </div>
 
@@ -1635,6 +2101,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             setEditLessonTitle(les.title);
                             setEditLessonDesc(les.description);
                             setEditLessonDiff(les.difficulty);
+                            setEditLessonQuestions(
+                              les.sampleQuestions.map((question) => ({
+                                ...question,
+                                options: [...question.options],
+                              }))
+                            );
                           }
                         }}
                         className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 font-bold shrink-0 cursor-pointer"
@@ -1644,7 +2116,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </div>
 
                     {isEditing && (
-                      <div className="p-3 rounded-xl bg-white border border-sky-200 space-y-2">
+                      <div className="p-3 rounded-xl bg-white border border-sky-200 space-y-3">
                         <input
                           type="text"
                           value={editLessonTitle}
@@ -1659,10 +2131,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200"
                           placeholder="Mô tả bài luyện..."
                         />
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
                           <select
                             value={editLessonDiff}
-                            onChange={(e) => setEditLessonDiff(e.target.value as any)}
+                            onChange={(e) =>
+                              setEditLessonDiff(
+                                e.target.value as 'Cơ bản' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao'
+                              )
+                            }
                             className="px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold"
                           >
                             <option value="Cơ bản">Cơ bản</option>
@@ -1670,14 +2146,193 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             <option value="Vận dụng">Vận dụng</option>
                             <option value="Vận dụng cao">Vận dụng cao</option>
                           </select>
-                          <button
-                            type="button"
-                            onClick={() => handleSaveLessonDirectEdit(les.id)}
-                            className="px-4 py-1.5 bg-sky-600 text-white font-extrabold rounded-lg cursor-pointer"
-                          >
-                            Lưu bài luyện
-                          </button>
                         </div>
+                        <div className="border-t border-slate-100 pt-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <h5 className="font-extrabold text-slate-800">
+                              Câu hỏi và đáp án ({editLessonQuestions.length})
+                            </h5>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditLessonQuestions((questions) => [
+                                  ...questions,
+                                  {
+                                    id: `admin-q-${Date.now()}`,
+                                    question: '',
+                                    options: ['', '', '', ''],
+                                    correctIndex: 0,
+                                    explanation: '',
+                                    points: 10,
+                                    difficulty: 'medium',
+                                  },
+                                ])
+                              }
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold"
+                            >
+                              + Thêm câu
+                            </button>
+                          </div>
+                          {editLessonQuestions.map((question, questionIndex) => (
+                            <fieldset
+                              key={question.id}
+                              className="p-3 rounded-xl border border-slate-200 space-y-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <legend className="font-extrabold text-sky-900">
+                                  Câu {questionIndex + 1}
+                                </legend>
+                                {editLessonQuestions.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEditLessonQuestions((questions) =>
+                                        questions.filter((_, index) => index !== questionIndex)
+                                      )
+                                    }
+                                    className="text-red-600 font-bold"
+                                  >
+                                    Xóa câu
+                                  </button>
+                                )}
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={question.question}
+                                onChange={(event) =>
+                                  setEditLessonQuestions((questions) =>
+                                    questions.map((item, index) =>
+                                      index === questionIndex
+                                        ? { ...item, question: event.target.value }
+                                        : item
+                                    )
+                                  )
+                                }
+                                placeholder="Nội dung câu hỏi"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200"
+                              />
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {question.options.map((option, optionIndex) => (
+                                  <label
+                                    key={`${question.id}-option-${optionIndex}`}
+                                    className="text-[11px] font-bold text-slate-600"
+                                  >
+                                    Đáp án {String.fromCharCode(65 + optionIndex)}
+                                    <input
+                                      type="text"
+                                      value={option}
+                                      onChange={(event) =>
+                                        setEditLessonQuestions((questions) =>
+                                          questions.map((item, index) =>
+                                            index === questionIndex
+                                              ? {
+                                                  ...item,
+                                                  options: item.options.map((value, currentIndex) =>
+                                                    currentIndex === optionIndex
+                                                      ? event.target.value
+                                                      : value
+                                                  ),
+                                                }
+                                              : item
+                                          )
+                                        )
+                                      }
+                                      className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-normal"
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <label className="text-[11px] font-bold text-slate-600">
+                                  Đáp án đúng
+                                  <select
+                                    value={question.correctIndex}
+                                    onChange={(event) =>
+                                      setEditLessonQuestions((questions) =>
+                                        questions.map((item, index) =>
+                                          index === questionIndex
+                                            ? { ...item, correctIndex: Number(event.target.value) }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white"
+                                  >
+                                    {question.options.map((_, optionIndex) => (
+                                      <option key={optionIndex} value={optionIndex}>
+                                        {String.fromCharCode(65 + optionIndex)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-[11px] font-bold text-slate-600">
+                                  Điểm
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={question.points}
+                                    onChange={(event) =>
+                                      setEditLessonQuestions((questions) =>
+                                        questions.map((item, index) =>
+                                          index === questionIndex
+                                            ? { ...item, points: Number(event.target.value) }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200"
+                                  />
+                                </label>
+                                <label className="text-[11px] font-bold text-slate-600">
+                                  Mức độ câu hỏi
+                                  <select
+                                    value={question.difficulty}
+                                    onChange={(event) =>
+                                      setEditLessonQuestions((questions) =>
+                                        questions.map((item, index) =>
+                                          index === questionIndex
+                                            ? {
+                                                ...item,
+                                                difficulty: event.target.value as QuizQuestion['difficulty'],
+                                              }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white"
+                                  >
+                                    <option value="easy">Cơ bản</option>
+                                    <option value="medium">Thông hiểu</option>
+                                    <option value="hard">Nâng cao</option>
+                                  </select>
+                                </label>
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={question.explanation}
+                                onChange={(event) =>
+                                  setEditLessonQuestions((questions) =>
+                                    questions.map((item, index) =>
+                                      index === questionIndex
+                                        ? { ...item, explanation: event.target.value }
+                                        : item
+                                    )
+                                  )
+                                }
+                                placeholder="Giải thích đáp án"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200"
+                              />
+                            </fieldset>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveLessonDirectEdit(les.id)}
+                          className="w-full px-4 py-2 bg-sky-600 text-white font-extrabold rounded-lg cursor-pointer"
+                        >
+                          Lưu bài luyện và câu hỏi
+                        </button>
                       </div>
                     )}
                   </div>

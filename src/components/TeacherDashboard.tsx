@@ -23,7 +23,8 @@ import {
   teacherUpdateStudentClassStatus,
   getTeacherCustomAssignments,
   saveTeacherCustomAssignment,
-  deleteTeacherCustomAssignment
+  deleteTeacherCustomAssignment,
+  applyLessonOverrides
 } from '../services/schoolManager';
 import {
   getVietnamese20LessonsByGrade,
@@ -567,9 +568,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           ) : (
             <div className="space-y-4">
               {approvedStudents.map((st) => {
-                const vanLessons = getVietnamese20LessonsByGrade(st.grade);
-                const toanLessons = getMath20LessonsByGrade(st.grade);
-                const anhLessons = getEnglish20LessonsByGrade(st.grade);
+                const vanLessons = applyLessonOverrides(getVietnamese20LessonsByGrade(st.grade));
+                const toanLessons = applyLessonOverrides(getMath20LessonsByGrade(st.grade));
+                const anhLessons = applyLessonOverrides(getEnglish20LessonsByGrade(st.grade));
 
                 const vanStats = getSubjectRealStats(st.grade, 'tieng-viet', vanLessons, st.email);
                 const toanStats = getSubjectRealStats(st.grade, 'toan', toanLessons, st.email);

@@ -10,6 +10,9 @@
     "start": "node server.js",
     "preview": "vite preview",
     "test:answer-positions": "tsx scripts/test-answer-positions.ts",
+    "test:admin-overrides": "tsx scripts/test-admin-content-overrides.ts",
+    "sync:admin-units": "tsx scripts/sync-vietnam-admin-units.ts",
+    "sync:osm-schools": "tsx scripts/sync-vietnam-osm-schools.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
