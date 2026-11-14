@@ -69,6 +69,18 @@ export const normalizeSchoolName = (school?: string): string => {
     .replace(/\s+/g, ' ');
 };
 
+export const formatSchoolName = (value: string): string =>
+  value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(/(\s+|-)/)
+    .map((part) => {
+      if (!part || /^[\s-]+$/.test(part)) return part;
+      if (part === part.toLocaleUpperCase('vi-VN')) return part;
+      return `${part.charAt(0).toLocaleUpperCase('vi-VN')}${part.slice(1).toLocaleLowerCase('vi-VN')}`;
+    })
+    .join('');
+
 export const isSameClassAndSchool = (
   classA?: string,
   schoolA?: string,

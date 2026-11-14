@@ -43,6 +43,7 @@ import {
   resetSiteConfig,
   saveLessonOverride,
   applyLessonOverrides,
+  formatSchoolName,
   getSchoolDirectory,
   saveSchoolDirectory,
   ADMIN_GMAIL_INTERNAL
@@ -96,9 +97,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [newAccountProvince, setNewAccountProvince] = useState('');
   const [newAccountDistrict, setNewAccountDistrict] = useState('');
   const [newAccountSchoolId, setNewAccountSchoolId] = useState('');
+  const [newAccountManualSchoolName, setNewAccountManualSchoolName] = useState('');
+  const [isNewAccountManualSchool, setIsNewAccountManualSchool] = useState(false);
+  const [newAccountManualSchoolLevel, setNewAccountManualSchoolLevel] =
+    useState<Exclude<SchoolDirectoryEntry['schoolLevel'], 'all'>>('elementary');
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'student' | 'teacher' | 'school'>('all');
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+
+  const newAccountSchools = schoolDirectory.filter(
+    (school) =>
+      school.provinceOrCity === newAccountProvince &&
+      school.district === newAccountDistrict &&
+      (newAccountRole === 'school' ||
+        school.schoolLevel === 'all' ||
+        school.schoolLevel === (
+          newAccountGrade <= 5
+            ? 'elementary'
+            : newAccountGrade <= 9
+              ? 'lower-secondary'
+              : 'upper-secondary'
+        ))
+  );
+  const newAccountManualSchoolMode =
+    Boolean(newAccountDistrict) &&
+    (isNewAccountManualSchool || newAccountSchools.length === 0);
 
   // State sửa mật khẩu & sửa Lớp/Trường trong quản lý tài khoản
   const [editingPasswordEmail, setEditingPasswordEmail] = useState<string | null>(null);
@@ -383,15 +406,39 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
 
-    const school = schoolDirectory.find((entry) => entry.id === newAccountSchoolId);
-    if (
-      !school ||
-      school.provinceOrCity !== newAccountProvince ||
-      school.district !== newAccountDistrict
-    ) {
-      notify('⚠️ Hãy chọn trường đã được thêm vào danh mục.');
+    const province = VIETNAM_ADMIN_UNITS.find((entry) => entry.name === newAccountProvince);
+    if (!province || !province.wards.some((ward) => ward.name === newAccountDistrict)) {
+      notify('⚠️ Hãy chọn tỉnh/thành và phường/xã hợp lệ.');
       return;
     }
+    const school = newAccountManualSchoolMode
+      ? undefined
+      : newAccountSchools.find((entry) => entry.id === newAccountSchoolId);
+    const schoolName = newAccountManualSchoolMode
+      ? formatSchoolName(newAccountManualSchoolName)
+      : school?.schoolName;
+    if (!schoolName || (!newAccountManualSchoolMode && !school)) {
+      notify(
+        newAccountManualSchoolMode
+          ? '⚠️ Nhập tên trường cần tạo tài khoản.'
+          : '⚠️ Hãy chọn trường trong danh mục hoặc chuyển sang nhập tên thủ công.'
+      );
+      return;
+    }
+
+    const gradeSchoolLevel: SchoolDirectoryEntry['schoolLevel'] =
+      newAccountGrade <= 5
+        ? 'elementary'
+        : newAccountGrade <= 9
+          ? 'lower-secondary'
+          : 'upper-secondary';
+    const schoolLevel = newAccountManualSchoolMode
+      ? newAccountRole === 'school'
+        ? newAccountManualSchoolLevel
+        : gradeSchoolLevel
+      : school && school.schoolLevel !== 'all'
+        ? school.schoolLevel
+        : gradeSchoolLevel;
 
     const account: UserAccount = {
       id: `user-${Date.now()}`,
@@ -401,16 +448,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       verifiedByGmail: true,
       grade: newAccountGrade,
       className: newAccountRole === 'school' ? '' : newAccountClass.trim().toUpperCase(),
-      school: school.schoolName,
-      schoolLevel: school.schoolLevel === 'all'
-        ? newAccountGrade <= 5
-          ? 'elementary'
-          : newAccountGrade <= 9
-            ? 'lower-secondary'
-            : 'upper-secondary'
-        : school.schoolLevel,
-      provinceOrCity: school.provinceOrCity,
-      district: school.district,
+      school: schoolName,
+      schoolLevel,
+      provinceOrCity: newAccountProvince,
+      district: newAccountDistrict,
       role: newAccountRole,
       canPracticeAll: true,
       practiceApprovalStatus: 'approved',
@@ -435,6 +476,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setNewAccountProvince('');
     setNewAccountDistrict('');
     setNewAccountSchoolId('');
+    setNewAccountManualSchoolName('');
+    setIsNewAccountManualSchool(false);
     notify(`✅ Đã tạo tài khoản ${newAccountRole === 'school' ? 'nhà trường' : newAccountRole === 'teacher' ? 'giáo viên' : 'học sinh'}.`);
   };
 
@@ -1566,9 +1609,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               Loại tài khoản
               <select
                 value={newAccountRole}
-                onChange={(event) =>
-                  setNewAccountRole(event.target.value as 'student' | 'teacher' | 'school')
-                }
+                onChange={(event) => {
+                  setNewAccountRole(event.target.value as 'student' | 'teacher' | 'school');
+                  setNewAccountSchoolId('');
+                  setIsNewAccountManualSchool(false);
+                }}
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
               >
                 <option value="school">Nhà trường (chỉ Admin tạo)</option>
@@ -1585,6 +1630,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   setNewAccountProvince(event.target.value);
                   setNewAccountDistrict('');
                   setNewAccountSchoolId('');
+                  setNewAccountManualSchoolName('');
+                  setIsNewAccountManualSchool(false);
                 }}
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
               >
@@ -1603,6 +1650,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 onChange={(event) => {
                   setNewAccountDistrict(event.target.value);
                   setNewAccountSchoolId('');
+                  setNewAccountManualSchoolName('');
+                  setIsNewAccountManualSchool(false);
                 }}
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
               >
@@ -1614,35 +1663,76 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   ))}
               </select>
             </label>
-            <label className="text-xs font-bold text-slate-700">
-              Trường trong khu vực đã chọn
-              <select
-                required
-                value={newAccountSchoolId}
-                onChange={(event) => setNewAccountSchoolId(event.target.value)}
-                disabled={!newAccountDistrict}
-                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
-              >
-                <option value="">Chọn trường</option>
-                {schoolDirectory
-                  .filter((school) =>
-                    school.provinceOrCity === newAccountProvince &&
-                    school.district === newAccountDistrict &&
-                    (newAccountRole === 'school' ||                     (school.schoolLevel === 'all' || school.schoolLevel === (
-                      newAccountGrade <= 5
-                        ? 'elementary'
-                        : newAccountGrade <= 9
-                          ? 'lower-secondary'
-                          : 'upper-secondary'
-                    )))
-                  )
-                  .map((school) => (
-                  <option key={school.id} value={school.id}>
-                    {school.schoolName}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="text-xs font-bold text-slate-700">
+              <label htmlFor="admin-account-school">Trường trong khu vực đã chọn</label>
+              {newAccountManualSchoolMode ? (
+                <input
+                  id="admin-account-school"
+                  required
+                  value={newAccountManualSchoolName}
+                  onChange={(event) => setNewAccountManualSchoolName(event.target.value)}
+                  onBlur={(event) =>
+                    setNewAccountManualSchoolName(formatSchoolName(event.target.value))
+                  }
+                  placeholder="Tên riêng trường (VD: ABC)"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+                />
+              ) : (
+                <select
+                  id="admin-account-school"
+                  required
+                  value={newAccountSchoolId}
+                  onChange={(event) => setNewAccountSchoolId(event.target.value)}
+                  disabled={!newAccountDistrict}
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white disabled:bg-slate-100"
+                >
+                  <option value="">Chọn trường</option>
+                  {newAccountSchools.map((school) => (
+                    <option key={school.id} value={school.id}>
+                      {school.schoolName}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {newAccountRole === 'school' && newAccountManualSchoolMode && (
+                <select
+                  aria-label="Cấp học của trường"
+                  value={newAccountManualSchoolLevel}
+                  onChange={(event) =>
+                    setNewAccountManualSchoolLevel(
+                      event.target.value as Exclude<SchoolDirectoryEntry['schoolLevel'], 'all'>
+                    )
+                  }
+                  className="mt-2 w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+                >
+                  <option value="elementary">Tiểu học</option>
+                  <option value="lower-secondary">THCS</option>
+                  <option value="upper-secondary">THPT</option>
+                </select>
+              )}
+              {newAccountDistrict && newAccountManualSchoolMode && (
+                <p className="mt-1 text-[11px] font-normal text-amber-700">
+                  {newAccountSchools.length
+                    ? 'Có thể nhập tên trường nếu chưa có trong danh sách.'
+                    : 'Khu vực này chưa có trường trong danh sách; hãy nhập tên trường.'}
+                </p>
+              )}
+              {newAccountDistrict && newAccountSchools.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsNewAccountManualSchool(!newAccountManualSchoolMode);
+                    setNewAccountSchoolId('');
+                    setNewAccountManualSchoolName('');
+                  }}
+                  className="mt-1 text-[11px] font-semibold text-sky-700 underline"
+                >
+                  {newAccountManualSchoolMode
+                    ? 'Chọn trường trong danh sách'
+                    : 'Trường chưa có trong danh sách? Nhập tên'}
+                </button>
+              )}
+            </div>
             <label className="text-xs font-bold text-slate-700">
               Họ và tên
               <input
@@ -1678,7 +1768,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 Khối/lớp phụ trách
                 <div className="flex gap-2 mt-1">
                   <select
-                    value={newAccountGrade}
+                  value={newAccountGrade}
                     onChange={(event) => {
                       const grade = Number(event.target.value) as GradeLevel;
                       setNewAccountGrade(grade);
@@ -1704,14 +1794,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
           <button
             type="submit"
-            disabled={!schoolDirectory.length}
             className="px-5 py-3 rounded-xl bg-sky-600 disabled:bg-slate-300 text-white text-xs font-extrabold"
           >
             Tạo tài khoản
           </button>
-          {!schoolDirectory.length && (
-            <p className="text-xs text-red-600">Hãy thêm trường trong tab Danh mục trường/khu vực trước.</p>
-          )}
         </form>
       )}
 

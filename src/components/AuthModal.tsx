@@ -48,6 +48,7 @@ import {
   adminUpdateTeacherApproval,
   adminUpdateStudentPracticePermission,
   getSchoolDirectory,
+  formatSchoolName,
   getConfiguredMascotImage
 } from '../services/schoolManager';
 
@@ -115,6 +116,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     currentUser?.className || `${currentUser?.grade || currentGrade}A1`
   );
   const [schoolInput, setSchoolInput] = useState(currentUser?.school || '');
+  const [manualSchoolName, setManualSchoolName] = useState('');
+  const [isManualSchool, setIsManualSchool] = useState(false);
   const [schoolLevelInput, setSchoolLevelInput] = useState<GradeSchoolLevel>(
     currentUser?.schoolLevel || getSchoolLevelForGrade(currentUser?.grade || currentGrade)
   );
@@ -174,6 +177,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       entry.provinceOrCity === provinceInput &&
       entry.district === districtInput
   );
+  const manualSchoolMode =
+    Boolean(districtInput) && (isManualSchool || registrationSchools.length === 0);
+  const registrationSchoolName = manualSchoolMode
+    ? formatSchoolName(manualSchoolName)
+    : schoolInput.trim();
   const profileSchools = schoolDirectory.filter(
     (entry) =>
       (entry.schoolLevel === editSchoolLevel || entry.schoolLevel === 'all') &&
@@ -247,6 +255,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setProvinceInput('');
     setDistrictInput('');
     setSchoolInput('');
+    setManualSchoolName('');
+    setIsManualSchool(false);
   };
 
   const handleSchoolLevelChange = (schoolLevel: GradeSchoolLevel) => {
@@ -259,6 +269,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setProvinceInput('');
     setDistrictInput('');
     setSchoolInput('');
+    setManualSchoolName('');
+    setIsManualSchool(false);
   };
 
   const handleGoogleSignInClick = async () => {
@@ -508,17 +520,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     const cleanClass = (classNameInput.trim() || `${selectedGrade}A1`).toUpperCase();
-    const cleanSchool = schoolInput.trim();
-    const selectedSchool = schoolDirectory.find(
-      (entry) =>
-        entry.schoolName === cleanSchool &&
-        (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
-        entry.provinceOrCity === provinceInput &&
-        entry.district === districtInput
-    );
-    if (!selectedSchool) {
+    const cleanSchool = registrationSchoolName;
+    const selectedSchool = manualSchoolMode
+      ? undefined
+      : schoolDirectory.find(
+          (entry) =>
+            entry.schoolName === cleanSchool &&
+            (entry.schoolLevel === schoolLevelInput || entry.schoolLevel === 'all') &&
+            entry.provinceOrCity === provinceInput &&
+            entry.district === districtInput
+        );
+    if (!cleanSchool || (!manualSchoolMode && !selectedSchool)) {
       setErrors({
-        otp: 'Trường đã chọn không còn trong danh mục. Vui lòng quay lại chọn trường được Admin cấp.',
+        otp: 'Thông tin trường chưa hợp lệ. Vui lòng quay lại kiểm tra tên trường và địa bàn.',
       });
       setRegisterStep('form');
       return;
@@ -546,11 +560,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       grade: selectedGrade,
       className: cleanClass,
       school: cleanSchool,
-      schoolLevel: selectedSchool.schoolLevel === 'all'
-        ? schoolLevelInput
-        : selectedSchool.schoolLevel,
-      provinceOrCity: selectedSchool.provinceOrCity,
-      district: selectedSchool.district,
+      schoolLevel: selectedSchool
+        ? selectedSchool.schoolLevel === 'all'
+          ? schoolLevelInput
+          : selectedSchool.schoolLevel
+        : schoolLevelInput,
+      provinceOrCity: selectedSchool?.provinceOrCity || provinceInput,
+      district: selectedSchool?.district || districtInput,
       role: finalRole,
       // Học sinh mới khi đăng ký mặc định ở trạng thái KHÔNG CHO PHÉP (chờ Admin duyệt, chỉ làm thử 3 bài đầu)
       canPracticeAll: finalRole === 'teacher',
@@ -632,8 +648,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (!classNameInput.trim()) {
         newErrors.className = 'Vui lòng nhập tên lớp học (Ví dụ: 4A1, 7B, 10A2).';
       }
-      if (!schoolInput.trim() || !provinceInput.trim() || !districtInput.trim()) {
-        newErrors.school = 'Vui lòng chọn trường, tỉnh/thành và phường/xã trong danh mục.';
+      const hasSchoolName = manualSchoolMode
+        ? Boolean(manualSchoolName.trim())
+        : Boolean(schoolInput.trim());
+      if (!hasSchoolName || !provinceInput.trim() || !districtInput.trim()) {
+        newErrors.school = 'Vui lòng nhập/chọn trường, tỉnh/thành và phường/xã.';
       }
     }
 
@@ -2195,6 +2214,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             setProvinceInput(e.target.value);
                             setDistrictInput('');
                             setSchoolInput('');
+                            setManualSchoolName('');
+                            setIsManualSchool(false);
                           }}
                           className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white ${
                             errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
@@ -2212,6 +2233,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           onChange={(e) => {
                             setDistrictInput(e.target.value);
                             setSchoolInput('');
+                            setManualSchoolName('');
+                            setIsManualSchool(false);
                           }}
                           className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
                             errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
@@ -2222,30 +2245,63 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             <option key={ward.code} value={ward.name}>{ward.name}</option>
                           ))}
                         </select>
-                        <select
-                          required
-                          value={schoolInput}
-                          disabled={!districtInput || registrationSchools.length === 0}
-                          onChange={(e) => setSchoolInput(e.target.value)}
-                          className={`px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
-                            errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
-                          }`}
-                        >
-                          <option value="">
-                            {!districtInput
-                              ? 'Chọn phường/xã trước'
-                              : registrationSchools.length === 0
-                                ? 'Xã này chưa có trường trong danh mục'
-                                : 'Chọn trường'}
-                          </option>
-                          {registrationSchools.map((entry) => (
+                        {manualSchoolMode ? (
+                          <div className="space-y-1.5">
+                            <input
+                              type="text"
+                              required
+                              value={manualSchoolName}
+                              onChange={(event) => setManualSchoolName(event.target.value)}
+                              onBlur={(event) =>
+                                setManualSchoolName(formatSchoolName(event.target.value))
+                              }
+                              placeholder="Tên riêng trường (VD: ABC)"
+                              aria-label="Nhập tên trường còn thiếu"
+                              className={`w-full px-3 py-2.5 rounded-xl border text-xs font-medium bg-white ${
+                                errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
+                              }`}
+                            />
+                            {registrationSchools.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setIsManualSchool(false)}
+                                className="text-[11px] text-sky-700 font-semibold underline"
+                              >
+                                Chọn trường trong danh sách
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <select
+                              required
+                              value={schoolInput}
+                              disabled={!districtInput}
+                              onChange={(event) => setSchoolInput(event.target.value)}
+                              className={`w-full px-3 py-2.5 rounded-xl border text-xs font-medium bg-white disabled:bg-slate-100 ${
+                                errors.school ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
+                              }`}
+                            >
+                              <option value="">{districtInput ? 'Chọn trường' : 'Chọn phường/xã trước'}</option>
+                              {registrationSchools.map((entry) => (
                               <option key={entry.id} value={entry.schoolName}>{entry.schoolName}</option>
-                          ))}
-                        </select>
+                              ))}
+                            </select>
+                            {districtInput && (
+                              <button
+                                type="button"
+                                onClick={() => setIsManualSchool(true)}
+                                className="text-[11px] text-sky-700 font-semibold underline"
+                              >
+                                Trường chưa có trong danh sách? Nhập tên
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {districtInput && registrationSchools.length === 0 && (
                         <p className="text-[11px] text-amber-700 mt-2">
-                          Danh sách hiện có chưa có trường được xác minh thuộc xã này. Trường từ xã khác không được hiển thị; Admin cần bổ sung dữ liệu trường còn thiếu.
+                          Xã này chưa có trường trong danh mục. Nhập tên trường ở ô phía trên; cấp học và địa bàn đã chọn sẽ được lưu cùng tài khoản.
                         </p>
                       )}
                       <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
@@ -2627,7 +2683,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-500 font-medium">Trường học:</span>
-                  <strong className="text-slate-800 text-right">{schoolInput.trim()}</strong>
+                  <strong className="text-slate-800 text-right">{registrationSchoolName}</strong>
                 </div>
               </div>
 
