@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GradeLevel, UserAccount, SiteConfig } from './types';
 import { Header, AppPage } from './components/Header';
 import { HeroSection } from './components/HeroSection';
@@ -20,6 +20,12 @@ import {
   getSiteConfig,
   canUserAccessLesson
 } from './services/schoolManager';
+import {
+  createFirebaseAdminAccount,
+  FIREBASE_ADMIN_EMAIL,
+  signOutFirebaseAdmin,
+  subscribeToFirebaseAdmin
+} from './services/firebaseAdminAuth';
 import {
   FileText,
   GraduationCap,
@@ -45,25 +51,25 @@ export default function App() {
   // User Authentication State with Strict Gmail Registration Verification + Admin & Teacher Support
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     try {
+      localStorage.removeItem('bonben_admin_password');
       const saved = localStorage.getItem('bonben_user_account');
       if (saved) {
         const parsedUser: UserAccount = JSON.parse(saved);
-        // Allow Admin account internally
         if (
-          parsedUser.email?.toLowerCase() === ADMIN_GMAIL_INTERNAL &&
-          parsedUser.role === 'admin'
+          parsedUser.role === 'admin' ||
+          parsedUser.email?.toLowerCase() === ADMIN_GMAIL_INTERNAL
         ) {
-          return parsedUser;
-        }
-        // Allow registered student or teacher accounts verified by Gmail
-        const registeredList = getAllRegisteredAccounts();
-        const matched = registeredList.find(
-          (acc) =>
-            acc.email.toLowerCase() === parsedUser.email?.toLowerCase() &&
-            acc.verifiedByGmail === true
-        );
-        if (parsedUser.verifiedByGmail === true && matched) {
-          return matched;
+          localStorage.removeItem('bonben_user_account');
+        } else {
+          const registeredList = getAllRegisteredAccounts();
+          const matched = registeredList.find(
+            (acc) =>
+              acc.email.toLowerCase() === parsedUser.email?.toLowerCase() &&
+              acc.verifiedByGmail === true
+          );
+          if (parsedUser.verifiedByGmail === true && matched) {
+            return matched;
+          }
         }
       }
       localStorage.removeItem('bonben_user_account');
@@ -72,6 +78,7 @@ export default function App() {
     }
     return null;
   });
+  const adminAuthSessionRestored = useRef(false);
 
   const [activePage, setActivePage] = useState<AppPage>(() => {
     if (
@@ -85,6 +92,37 @@ export default function App() {
     }
     return 'home';
   });
+
+  useEffect(() => {
+    let unsubscribe: () => void = () => {};
+    try {
+      unsubscribe = subscribeToFirebaseAdmin((firebaseUser) => {
+        if (
+          firebaseUser?.email?.toLowerCase() === FIREBASE_ADMIN_EMAIL &&
+          firebaseUser.emailVerified
+        ) {
+          adminAuthSessionRestored.current = true;
+          const adminAccount = createFirebaseAdminAccount(firebaseUser, currentGrade);
+          setCurrentUser(adminAccount);
+          setCurrentGrade(adminAccount.grade);
+          setActivePage('admin-portal');
+          localStorage.setItem('bonben_user_account', JSON.stringify(adminAccount));
+          return;
+        }
+
+        if (adminAuthSessionRestored.current) {
+          adminAuthSessionRestored.current = false;
+          localStorage.removeItem('bonben_user_account');
+          setCurrentUser((user) => (user?.role === 'admin' ? null : user));
+          setActivePage('home');
+        }
+      });
+    } catch (error) {
+      console.error('FIREBASE_ADMIN_AUTH_LISTENER_ERROR:', error);
+    }
+
+    return unsubscribe;
+  }, []);
 
   // Sync user's grade
   useEffect(() => {
@@ -213,7 +251,14 @@ export default function App() {
     );
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOutFirebaseAdmin();
+    } catch (error) {
+      console.error('FIREBASE_ADMIN_SIGN_OUT_ERROR:', error);
+      showToast('Không thể đăng xuất khỏi Firebase. Vui lòng thử lại.');
+      return;
+    }
     setCurrentUser(null);
     setActivePage('home');
     localStorage.removeItem('bonben_user_account');

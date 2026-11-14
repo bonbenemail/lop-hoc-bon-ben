@@ -25,7 +25,6 @@ import {
   Save,
   Pencil
 } from 'lucide-react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { GradeLevel, SchoolDirectoryEntry, UserAccount } from '../types';
 import { MASCOT_IMAGE, GRADE_EXERCISE_TYPES } from '../data/bonbenData';
 import {
@@ -36,6 +35,12 @@ import {
   sendPasswordResetOtpViaGmail
 } from '../services/gmailAuth';
 import {
+  createFirebaseAdminAccount,
+  FIREBASE_ADMIN_EMAIL,
+  sendAdminFirebasePasswordReset,
+  signInAdminWithFirebase
+} from '../services/firebaseAdminAuth';
+import {
   getAllRegisteredAccounts,
   saveAllRegisteredAccounts,
   isSameClassAndSchool,
@@ -44,7 +49,7 @@ import {
   getSchoolDirectory
 } from '../services/schoolManager';
 
-const ADMIN_GMAIL = 'bonbenemail@gmail.com';
+const ADMIN_GMAIL = FIREBASE_ADMIN_EMAIL;
 
 const getSchoolLevelForGrade = (grade: number): SchoolDirectoryEntry['schoolLevel'] =>
   grade <= 5 ? 'elementary' : grade <= 9 ? 'lower-secondary' : 'upper-secondary';
@@ -90,6 +95,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [fullName, setFullName] = useState(currentUser?.fullName || '');
   const [email, setEmail] = useState(currentUser?.email || '');
   const [password, setPassword] = useState('');
+  const [isAdminSigningIn, setIsAdminSigningIn] = useState(false);
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(currentUser?.grade || currentGrade);
   const [classNameInput, setClassNameInput] = useState(
     currentUser?.className || `${currentUser?.grade || currentGrade}A1`
@@ -253,7 +259,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   // Gửi mã 6 số khôi phục mật khẩu qua Gmail thật cho tài khoản quên mật khẩu
-  const executeSendForgotOtp = async () => {
+  const executeSendForgotRequest = async () => {
     setIsSendingEmail(true);
     setErrors({});
     const cleanEmail = forgotEmail.trim().toLowerCase();
@@ -264,6 +270,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const targetName =
       matchedAccount?.fullName ||
       (cleanEmail === ADMIN_GMAIL ? 'Quản Trị Hệ Thống Bon Ben' : cleanEmail);
+
+    if (cleanEmail === ADMIN_GMAIL) {
+      try {
+        await sendAdminFirebasePasswordReset();
+        setShowForgotConfirmModal(false);
+        setSuccessMessage(
+          `Firebase đã gửi liên kết đặt lại mật khẩu tới ${ADMIN_GMAIL}. Hãy dùng liên kết đó để đặt mật khẩu mới.`
+        );
+        setTimeout(() => {
+          setSuccessMessage(null);
+          setAuthMode('login');
+          setForgotStep('request');
+        }, 4000);
+      } catch (error: unknown) {
+        setErrors({
+          gmail:
+            error instanceof Error
+              ? error.message
+              : 'Không thể gửi liên kết đặt lại mật khẩu Firebase.',
+        });
+      } finally {
+        setIsSendingEmail(false);
+      }
+      return;
+    }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     try {
@@ -330,6 +361,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleForgotVerifyAndResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
+    if (forgotEmail.trim().toLowerCase() === ADMIN_GMAIL) {
+      setErrors({
+        otp: 'Mật khẩu Admin phải được đặt lại bằng liên kết Firebase gửi tới email.',
+      });
+      return;
+    }
     const enteredCode = otpDigits.join('');
     if (enteredCode.length < 6) {
       setErrors({
@@ -369,27 +406,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return acc;
     });
 
-    if (cleanEmail === ADMIN_GMAIL) {
-      localStorage.setItem('bonben_admin_password', resetNewPassword);
-      if (!updatedAccount) {
-        updatedAccount = {
-          id: 'admin-bonbenemail',
-          fullName: 'Quản Trị Hệ Thống Bon Ben',
-          email: ADMIN_GMAIL,
-          password: resetNewPassword,
-          verifiedByGmail: true,
-          grade: currentGrade,
-          className: `${currentGrade}A1`,
-          school: 'Hệ thống Lớp học Bon Ben',
-          role: 'admin',
-          diamonds: 9999,
-          level: 99,
-          studentCode: 'ADMIN-BONBEN',
-          createdAt: new Date().toISOString(),
-        };
-      }
-    }
-
     localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
     refreshRegisteredStudents();
     setErrors({});
@@ -406,11 +422,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setForgotStep('request');
         setResetNewPassword('');
         setResetConfirmPassword('');
-        if (cleanEmail === ADMIN_GMAIL) {
-          setAuthMode('admin');
-        } else {
-          onClose();
-        }
+        onClose();
       }, 1300);
     }
   };
@@ -418,6 +430,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Chỉ được gọi SAU KHI người dùng đã nhập đúng mã 6 số gửi về Gmail khi Tạo tài khoản
   const completeRegistrationAfterGmailOtp = () => {
     const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail === ADMIN_GMAIL) {
+      setErrors({
+        otp: 'Tài khoản Admin chỉ được tạo trong Firebase Authentication, không đăng ký từ biểu mẫu công khai.',
+      });
+      setRegisterStep('form');
+      return;
+    }
 
     // Kiểm tra lại lần nữa: 1 Gmail chỉ được tạo duy nhất 1 tài khoản
     const existingAccounts = getRegisteredGmailAccounts();
@@ -447,12 +466,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setRegisterStep('form');
       return;
     }
-    const isThisAdmin = cleanEmail === ADMIN_GMAIL;
-    const finalRole: 'admin' | 'teacher' | 'student' = isThisAdmin
-      ? 'admin'
-      : registerAccountType === 'teacher'
-        ? 'teacher'
-        : 'student';
+    const finalRole: 'teacher' | 'student' =
+      registerAccountType === 'teacher' ? 'teacher' : 'student';
 
     // Kiểm tra xem Học sinh mới đăng ký có trùng Lớp & Trường với Giáo viên nào đã đăng ký không
     const matchedTeacher =
@@ -479,9 +494,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       district: selectedSchool.district,
       role: finalRole,
       // Học sinh mới khi đăng ký mặc định ở trạng thái KHÔNG CHO PHÉP (chờ Admin duyệt, chỉ làm thử 3 bài đầu)
-      canPracticeAll: finalRole === 'admin' || finalRole === 'teacher' ? true : false,
-      practiceApprovalStatus:
-        finalRole === 'admin' || finalRole === 'teacher' ? 'approved' : 'pending',
+      canPracticeAll: finalRole === 'teacher',
+      practiceApprovalStatus: finalRole === 'teacher' ? 'approved' : 'pending',
       // Giáo viên mới đăng ký cần được Admin xét duyệt
       teacherApprovalStatus: finalRole === 'teacher' ? 'pending' : undefined,
       // Nếu học sinh trùng Lớp & Trường với giáo viên đã đăng ký -> Đợi giáo viên cho vào lớp
@@ -490,9 +504,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       matchedTeacherName: matchedTeacher?.fullName,
       diamonds: 0,
       level: 1,
-      studentCode: isThisAdmin
-        ? 'ADMIN-BONBEN'
-        : finalRole === 'teacher'
+      studentCode:
+        finalRole === 'teacher'
           ? `GV-${cleanClass}-${Math.floor(100 + Math.random() * 900)}`
           : `HS-${cleanClass}-${Math.floor(100 + Math.random() * 900)}`,
       selectedExerciseTypes: (GRADE_EXERCISE_TYPES[selectedGrade] || GRADE_EXERCISE_TYPES[4]).map(
@@ -500,10 +513,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       ),
       createdAt: new Date().toISOString(),
     };
-
-    if (isThisAdmin) {
-      localStorage.setItem('bonben_admin_password', password);
-    }
 
     const updatedAccounts = [...existingAccounts, newAccount];
     saveAllRegisteredAccounts(updatedAccounts);
@@ -532,15 +541,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setTimeout(() => {
       setSuccessMessage(null);
       setRegisterStep('form');
-      if (isThisAdmin) {
-        setAuthMode('admin');
-      } else {
-        onClose();
-      }
+      onClose();
     }, 1500);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: { [key: string]: string } = {};
     const cleanEmail = email.trim().toLowerCase();
@@ -586,6 +591,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     // NẾU LÀ TẠO TÀI KHOẢN MỚI:
     // Kiểm tra nghiêm ngặt: 1 tài khoản Gmail chỉ được tạo duy nhất 1 tài khoản!
     if (authMode === 'register') {
+      if (cleanEmail === ADMIN_GMAIL) {
+        setErrors({
+          email: 'Tài khoản Admin chỉ được tạo và quản lý trong Firebase Authentication.',
+        });
+        return;
+      }
       if (matchedAccount) {
         setErrors({
           email: `Mỗi tài khoản Gmail chỉ được tạo duy nhất 1 tài khoản! Địa chỉ Gmail "${cleanEmail}" đã được đăng ký trước đó, không được đăng ký thêm tài khoản nào khác.`,
@@ -598,51 +609,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // NẾU LÀ ĐĂNG NHẬP:
-    // Tự động nhận diện nếu đăng nhập bằng bonbenemail@gmail.com -> Tự biết đó là Admin và có toàn quyền quản lý!
+    // Admin đăng nhập bằng Firebase Authentication, không dùng mật khẩu trong localStorage.
     if (cleanEmail === ADMIN_GMAIL) {
-      const savedAdminPwd = localStorage.getItem('bonben_admin_password');
-      if (matchedAccount && matchedAccount.password && password !== matchedAccount.password && savedAdminPwd && password !== savedAdminPwd) {
-        setErrors({
-          login: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại mật khẩu.',
-          password: 'Mật khẩu không chính xác.',
-        });
-        return;
+      setIsAdminSigningIn(true);
+      try {
+        const firebaseUser = await signInAdminWithFirebase(cleanEmail, password);
+        const adminAccount = createFirebaseAdminAccount(firebaseUser, currentGrade);
+        setErrors({});
+        refreshRegisteredStudents();
+        onSelectGrade(currentGrade);
+        onLogin(adminAccount);
+        setAuthMode('admin');
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : 'Đăng nhập Admin bằng Firebase thất bại.';
+        setErrors({ login: message, password: message });
+      } finally {
+        setIsAdminSigningIn(false);
       }
-      if (!matchedAccount && savedAdminPwd && password !== savedAdminPwd) {
-        setErrors({
-          login: 'Mật khẩu không chính xác. Vui lòng kiểm tra lại mật khẩu.',
-          password: 'Mật khẩu không chính xác.',
-        });
-        return;
-      }
-      // Lưu mật khẩu Admin nếu chưa có
-      if (!savedAdminPwd) {
-        localStorage.setItem('bonben_admin_password', password);
-      }
-
-      const adminAccount: UserAccount = matchedAccount
-        ? { ...matchedAccount, role: 'admin' }
-        : {
-            id: 'admin-bonbenemail',
-            fullName: 'Quản Trị Hệ Thống Bon Ben',
-            email: ADMIN_GMAIL,
-            password: password,
-            verifiedByGmail: true,
-            grade: currentGrade,
-            className: `${currentGrade}A1`,
-            school: 'Hệ thống Lớp học Bon Ben',
-            role: 'admin',
-            diamonds: 9999,
-            level: 99,
-            studentCode: 'ADMIN-BONBEN',
-            createdAt: new Date().toISOString(),
-          };
-
-      setErrors({});
-      refreshRegisteredStudents();
-      onLogin(adminAccount);
-      setAuthMode('admin');
       return;
     }
 
@@ -727,9 +711,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         : acc
     );
     localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
-    if (studentEmail.toLowerCase() === ADMIN_GMAIL) {
-      localStorage.setItem('bonben_admin_password', newStudentPassword);
-    }
     setRegisteredStudents(updatedList);
     setEditingPasswordEmail(null);
     setNewStudentPassword('');
@@ -2102,14 +2083,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-sm rounded-2xl shadow-md shadow-sky-600/25 flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
+                    disabled={isAdminSigningIn}
+                    className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 disabled:opacity-70 text-white font-extrabold text-sm rounded-2xl shadow-md shadow-sky-600/25 flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
                   >
-                    <span>
-                      {authMode === 'login'
-                        ? 'Đăng nhập'
-                        : 'Tạo tài khoản (Gửi mã 6 số về Gmail)'}
-                    </span>
-                    <ArrowRight className="w-4 h-4" />
+                    {isAdminSigningIn ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Đang xác thực Admin với Firebase...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          {authMode === 'login'
+                            ? 'Đăng nhập'
+                            : 'Tạo tài khoản (Gửi mã 6 số về Gmail)'}
+                        </span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -2160,10 +2151,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-xs sm:text-sm font-extrabold text-slate-900">
-                    Khôi phục mật khẩu bằng mã 6 số gửi về Gmail thật
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Đặt lại mật khẩu Admin qua Firebase'
+                      : 'Khôi phục mật khẩu bằng mã 6 số gửi về Gmail thật'}
                   </h4>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Nhập địa chỉ <strong>Gmail (@gmail.com) đã đăng ký</strong> tài khoản trên Lớp học Bon Ben. Hệ thống sẽ gửi một <strong>mã xác thực 6 chữ số</strong> trực tiếp vào hộp thư Gmail đó để bạn đổi lại mật khẩu mới.
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Firebase sẽ gửi liên kết đặt lại mật khẩu tới hộp thư Admin đã đăng ký trong Firebase Authentication.'
+                      : 'Nhập địa chỉ Gmail (@gmail.com) đã đăng ký tài khoản trên Lớp học Bon Ben. Hệ thống sẽ gửi mã xác thực 6 chữ số trực tiếp vào hộp thư để đổi mật khẩu.'}
                   </p>
                 </div>
               </div>
@@ -2174,7 +2169,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     Địa chỉ Gmail đã đăng ký tài khoản: <span className="text-red-500">*</span>
                   </label>
                   <span className="text-[10px] text-amber-700 font-bold">
-                    Chỉ Gmail đã đăng ký mới nhận được mã
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Liên kết do Firebase gửi'
+                      : 'Chỉ Gmail đã đăng ký mới nhận được mã'}
                   </span>
                 </div>
                 <div className="relative">
@@ -2542,10 +2539,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
                 <div>
                   <h4 className="font-extrabold text-slate-900 text-sm sm:text-base">
-                    Xác nhận gửi Mã 6 Số Khôi Phục Mật Khẩu
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Xác nhận gửi liên kết đặt lại mật khẩu Firebase'
+                      : 'Xác nhận gửi Mã 6 Số Khôi Phục Mật Khẩu'}
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Gửi trực tiếp về hộp thư Gmail đã đăng ký
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Firebase gửi liên kết bảo mật tới email Admin'
+                      : 'Gửi trực tiếp về hộp thư Gmail đã đăng ký'}
                   </p>
                 </div>
               </div>
@@ -2556,18 +2557,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <strong className="text-sky-900 font-bold">Lớp học Bon Ben</strong>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-slate-500 font-medium">Gmail nhận mã (To):</span>
+                  <span className="text-slate-500 font-medium">
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Email nhận liên kết:'
+                      : 'Gmail nhận mã (To):'}
+                  </span>
                   <strong className="text-amber-800 font-bold">
                     {forgotEmail.trim().toLowerCase()}
                   </strong>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-500 font-medium">Mục đích:</span>
-                  <strong className="text-slate-800">Đổi lại mật khẩu mới (Mã 6 số)</strong>
+                  <strong className="text-slate-800">
+                    {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                      ? 'Đặt lại mật khẩu bằng Firebase'
+                      : 'Đổi lại mật khẩu mới (Mã 6 số)'}
+                  </strong>
                 </div>
               </div>
 
-              {needsGmailAuth && (
+              {needsGmailAuth && forgotEmail.trim().toLowerCase() !== ADMIN_GMAIL && (
                 <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
                   <p className="font-semibold">
                     Vui lòng nhấn nút bên dưới để đăng nhập Google cấp quyền gửi thư khôi phục:
@@ -2636,7 +2645,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <button
                   type="button"
                   disabled={isSendingEmail}
-                  onClick={executeSendForgotOtp}
+                  onClick={executeSendForgotRequest}
                   className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   {isSendingEmail ? (
@@ -2647,7 +2656,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Gửi mã 6 số ngay</span>
+                      <span>
+                        {forgotEmail.trim().toLowerCase() === ADMIN_GMAIL
+                          ? 'Gửi liên kết đặt lại'
+                          : 'Gửi mã 6 số ngay'}
+                      </span>
                     </>
                   )}
                 </button>
