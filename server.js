@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MailRequestError, sendEmail, verifyEmailProvider } from './email/mailer.js';
+import deleteUserHandler from './api/delete-user.js';
 
 dotenv.config();
 
@@ -44,6 +45,11 @@ app.post('/api/send-mail', async (req, res) => {
     });
   }
 });
+
+// Xóa tận gốc tài khoản khỏi Firebase Authentication + Firestore.
+// Dùng chung handler với Vercel Serverless Function (api/delete-user.js),
+// cần cấu hình Firebase Admin SDK trong .env khi chạy local.
+app.post('/api/delete-user', (req, res) => deleteUserHandler(req, res));
 
 app.use(express.static(buildDirectory, { index: false }));
 
