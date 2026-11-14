@@ -22,6 +22,7 @@ export interface LessonProgressRecord {
   accuracyOnAnswered: number;
   status: 'not-started' | 'in-progress' | 'completed';
   selectedAnswers: Record<string, number>;
+  selectedAnswerOriginalIndexes?: Record<string, number>;
   submittedQuestions: Record<string, boolean>;
   updatedAt: string;
 }

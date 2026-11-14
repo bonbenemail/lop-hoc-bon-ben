@@ -22,6 +22,7 @@ import {
   canUserAccessExam,
   getConfiguredMascotImage,
 } from '../services/schoolManager';
+import { shuffleQuestionsForAttempt } from '../utils/answerOptionShuffle';
 
 interface ExamTestModalProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ export const ExamTestModal: React.FC<ExamTestModalProps> = ({
 }) => {
   const [examState, setExamState] = useState<'intro' | 'testing' | 'result'>('intro');
   const [selectedExamId, setSelectedExamId] = useState<string>('exam-van');
+  const [attemptQuestions, setAttemptQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState<{ [qIndex: number]: number }>({});
   const [flagged, setFlagged] = useState<{ [qIndex: number]: boolean }>({});
@@ -94,7 +96,10 @@ export const ExamTestModal: React.FC<ExamTestModalProps> = ({
   ];
 
   const activeExam: ExamTest = MULTI_SUBJECT_EXAMS.find(e => e.id === selectedExamId) || MULTI_SUBJECT_EXAMS[0];
-  const questions: QuizQuestion[] = activeExam.questions; // Guaranteed 20 questions
+  const questions: QuizQuestion[] =
+    examState === 'intro' || attemptQuestions.length === 0
+      ? activeExam.questions
+      : attemptQuestions;
 
   useEffect(() => {
     let interval: any;
@@ -118,7 +123,10 @@ export const ExamTestModal: React.FC<ExamTestModalProps> = ({
 
   const handleStartExam = (examId?: string) => {
     if (!isExamAllowed) return;
-    if (examId) setSelectedExamId(examId);
+    const examToStart =
+      MULTI_SUBJECT_EXAMS.find((exam) => exam.id === (examId || selectedExamId)) || activeExam;
+    setSelectedExamId(examToStart.id);
+    setAttemptQuestions(shuffleQuestionsForAttempt(examToStart.questions).questions);
     setExamState('testing');
     setCurrentIdx(0);
     setAnswers({});

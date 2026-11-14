@@ -41,6 +41,7 @@ import {
   canUserAccessLesson,
   getConfiguredMascotImage
 } from '../services/schoolManager';
+import { shuffleQuestionsForAttempt } from '../utils/answerOptionShuffle';
 
 interface InteractiveLessonModalProps {
   lessonId: string | null;
@@ -69,9 +70,13 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoProgress] = useState(0);
   const [showHint, setShowHint] = useState(false);
+  const [hintAvailable, setHintAvailable] = useState(false);
   const [lockWarning, setLockWarning] = useState<string | null>(null);
 
   const [activeQIndex, setActiveQIndex] = useState(0);
+  const [attemptLessonId, setAttemptLessonId] = useState<string | null>(null);
+  const [attemptQuestions, setAttemptQuestions] = useState<QuizQuestion[]>([]);
+  const [attemptOptionOrders, setAttemptOptionOrders] = useState<Record<string, number[]>>({});
   const [selectedAnswers, setSelectedAnswers] = useState<{ [qId: string]: number }>({});
   const [submittedQuestions, setSubmittedQuestions] = useState<{ [qId: string]: boolean }>({});
   const [hasCompletedLesson, setHasCompletedLesson] = useState(false);
@@ -146,7 +151,7 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
     subjectLessonsList[0];
 
   // Đảm bảo đúng danh sách câu hỏi của bài tập Giáo viên tạo hoặc 20 câu hỏi của môn hiện tại
-  const questionsList: QuizQuestion[] =
+  const baseQuestionsList: QuizQuestion[] =
     currentLesson?.sampleQuestions && currentLesson.sampleQuestions.length > 0
       ? currentLesson.sampleQuestions
       : subjectBank === 'tieng-viet'
@@ -155,11 +160,19 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
           ? ENGLISH_PRACTICE_20_QUESTIONS
           : LESSON_PRACTICE_20_QUESTIONS;
 
+  const hasCurrentAttempt =
+    attemptLessonId === currentLesson?.id && attemptQuestions.length > 0;
+  const questionsList = hasCurrentAttempt ? attemptQuestions : baseQuestionsList;
+  const questionOptionOrders = hasCurrentAttempt ? attemptOptionOrders : {};
   const totalQuestionsCount = questionsList.length || 20;
 
-  // Tải đúng dữ liệu làm bài thực tế của bài học hiện tại (mặc định chưa làm là rỗng = 0%)
+  // Mỗi lần mở bài sẽ tạo thứ tự câu hỏi và đáp án mới, đồng thời giữ lại câu trả lời đã lưu.
   useEffect(() => {
-    if (!currentLesson?.id) return;
+    if (!isOpen || !currentLesson?.id) return;
+    const attempt = shuffleQuestionsForAttempt(baseQuestionsList);
+    setAttemptLessonId(currentLesson.id);
+    setAttemptQuestions(attempt.questions);
+    setAttemptOptionOrders(attempt.optionOrders);
     const saved = getLessonProgress(currentLesson.id, userEmail, {
       title: currentLesson.title,
       subjectId:
@@ -167,16 +180,44 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
       grade: currentLesson.grade || currentGrade,
       totalQuestions: totalQuestionsCount,
     });
-    setSelectedAnswers(saved.selectedAnswers || {});
+    const remappedAnswers: Record<string, number> = {};
+    for (const question of attempt.questions) {
+      const savedIndex = saved.selectedAnswers[question.id];
+      if (savedIndex === undefined) continue;
+      const originalIndex = saved.selectedAnswerOriginalIndexes?.[question.id] ?? savedIndex;
+      const attemptIndex = attempt.optionOrders[question.id]?.indexOf(originalIndex) ?? -1;
+      if (attemptIndex >= 0) remappedAnswers[question.id] = attemptIndex;
+    }
+    setSelectedAnswers(remappedAnswers);
     setSubmittedQuestions(saved.submittedQuestions || {});
     setActiveQIndex(0);
     setHasCompletedLesson(false);
     setShowHint(false);
+    setHintAvailable(false);
   }, [currentLesson?.id, userEmail, isOpen]);
 
-  if (!isOpen) return null;
-
   const currentQuestion = questionsList[activeQIndex] || questionsList[0];
+  const currentQuestionSubmitted = currentQuestion
+    ? Boolean(submittedQuestions[currentQuestion.id])
+    : false;
+
+  useEffect(() => {
+    setHintAvailable(false);
+    setShowHint(false);
+    if (!isOpen || activeTab !== 'practice' || !currentQuestion || currentQuestionSubmitted) return;
+
+    const timeoutId = window.setTimeout(() => setHintAvailable(true), 60_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    isOpen,
+    activeTab,
+    currentLesson?.id,
+    activeQIndex,
+    currentQuestion?.id,
+    currentQuestionSubmitted,
+  ]);
+
+  if (!isOpen) return null;
 
   const persistCurrentLessonState = (
     nextSelected: { [qId: string]: number },
@@ -190,6 +231,13 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
     const wrong = Math.max(0, answered - correct);
     const understandingRate = Math.round((correct / totalQ) * 100);
     const accuracyOnAnswered = answered > 0 ? Math.round((correct / answered) * 100) : 0;
+    const selectedAnswerOriginalIndexes: Record<string, number> = {};
+    for (const [questionId, selectedIndex] of Object.entries(nextSelected)) {
+      const originalIndex = questionOptionOrders[questionId]?.[selectedIndex];
+      if (originalIndex !== undefined) {
+        selectedAnswerOriginalIndexes[questionId] = originalIndex;
+      }
+    }
 
     saveLessonProgress(
       {
@@ -206,6 +254,7 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
         accuracyOnAnswered,
         status: answered === 0 ? 'not-started' : answered >= totalQ ? 'completed' : 'in-progress',
         selectedAnswers: nextSelected,
+        selectedAnswerOriginalIndexes,
         submittedQuestions: nextSubmitted,
         updatedAt: new Date().toISOString(),
       },
@@ -229,11 +278,16 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
 
   const handleResetThisLesson = () => {
     resetSingleLessonProgress(currentLesson.id, userEmail);
+    const attempt = shuffleQuestionsForAttempt(baseQuestionsList);
+    setAttemptLessonId(currentLesson.id);
+    setAttemptQuestions(attempt.questions);
+    setAttemptOptionOrders(attempt.optionOrders);
     setSelectedAnswers({});
     setSubmittedQuestions({});
     setActiveQIndex(0);
     setHasCompletedLesson(false);
     setShowHint(false);
+    setHintAvailable(false);
     if (onProgressUpdated) {
       onProgressUpdated();
     }
@@ -500,13 +554,15 @@ export const InteractiveLessonModal: React.FC<InteractiveLessonModalProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setShowHint(!showHint)}
-                          className="px-3 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/70 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                          <span>Gợi ý từ AI Bon Ben</span>
-                        </button>
+                        {(hintAvailable || submittedQuestions[currentQuestion.id]) && (
+                          <button
+                            onClick={() => setShowHint(!showHint)}
+                            className="px-3 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/70 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                            <span>Gợi ý từ AI Bon Ben</span>
+                          </button>
+                        )}
 
                         {submittedQuestions[currentQuestion.id] && (
                           <span className={`text-xs font-bold px-3 py-1 rounded-xl flex items-center gap-1 ${

@@ -3,7 +3,10 @@ import {
   getMath20LessonsByGrade,
   getVietnamese20LessonsByGrade,
 } from '../src/data/practiceLessonsData';
-import { shuffleQuestionOptions } from '../src/utils/answerOptionShuffle';
+import {
+  shuffleQuestionOptions,
+  shuffleQuestionsForAttempt,
+} from '../src/utils/answerOptionShuffle';
 import { createServer } from 'vite';
 import type { Lesson, QuizQuestion } from '../src/types';
 
@@ -25,6 +28,56 @@ for (let correctIndex = 0; correctIndex < 4; correctIndex++) {
 }
 if (answerPositions.size !== 4) {
   throw new Error('The shuffle does not use all four answer positions.');
+}
+
+const createRandom = (initialState: number): (() => number) => {
+  let state = initialState;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+};
+
+const attemptSourceQuestions = Array.from({ length: 40 }, (_, index) => ({
+  id: `attempt-q${index + 1}`,
+  question: `Question ${index + 1}`,
+  options: ['A', 'B', 'C', 'D'],
+  correctIndex: index % 4,
+  explanation: `Đáp án đúng là ${String.fromCharCode(65 + (index % 4))}: ${['A', 'B', 'C', 'D'][index % 4]}`,
+  points: 1,
+  difficulty: 'easy' as const,
+}));
+const firstAttempt = shuffleQuestionsForAttempt(attemptSourceQuestions, createRandom(1));
+const secondAttempt = shuffleQuestionsForAttempt(attemptSourceQuestions, createRandom(2));
+const sourceQuestionById = new Map(attemptSourceQuestions.map((question) => [question.id, question]));
+const secondAttemptById = new Map(secondAttempt.questions.map((question) => [question.id, question]));
+const firstAttemptPositions = new Set<number>();
+let optionsChangedBetweenAttempts = false;
+let correctPositionChangedBetweenAttempts = false;
+for (const question of firstAttempt.questions) {
+  const sourceQuestion = sourceQuestionById.get(question.id);
+  const secondAttemptQuestion = secondAttemptById.get(question.id);
+  if (
+    !sourceQuestion ||
+    !secondAttemptQuestion ||
+    question.options[question.correctIndex] !== sourceQuestion.options[sourceQuestion.correctIndex] ||
+    question.explanation !==
+      `Đáp án đúng là ${String.fromCharCode(65 + question.correctIndex)}: ${sourceQuestion.options[sourceQuestion.correctIndex]}`
+  ) {
+    throw new Error("A randomized practice attempt changed a question's correct answer.");
+  }
+  firstAttemptPositions.add(question.correctIndex);
+  optionsChangedBetweenAttempts ||= JSON.stringify(question.options) !== JSON.stringify(secondAttemptQuestion.options);
+  correctPositionChangedBetweenAttempts ||= question.correctIndex !== secondAttemptQuestion.correctIndex;
+}
+if (
+  firstAttemptPositions.size < 3 ||
+  !optionsChangedBetweenAttempts ||
+  !correctPositionChangedBetweenAttempts ||
+  JSON.stringify(firstAttempt.questions.map((question) => question.id)) ===
+    JSON.stringify(secondAttempt.questions.map((question) => question.id))
+) {
+  throw new Error('New attempts must randomize question order and correct answer positions.');
 }
 
 const getMathExpectedAnswers = (grade: number, lessonNumber: number): string[] => {
