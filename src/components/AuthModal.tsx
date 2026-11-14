@@ -1393,7 +1393,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {currentUser.fullName}
                     </h4>
                     <p className="text-xs text-sky-700 font-semibold">
-                      {isAdminUser ? 'Tài khoản Quản trị viên Hệ thống' : `Gmail: ${currentUser.email}`}
+                      {isAdminUser
+                        ? 'Tài khoản Quản trị viên Hệ thống'
+                        : currentUser.username
+                          ? `Tên đăng nhập: ${currentUser.username}`
+                          : `Gmail: ${currentUser.email}`}
                     </p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-slate-600 flex-wrap">
                       <span className="font-bold text-sky-900">

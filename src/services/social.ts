@@ -35,27 +35,48 @@ export const requireUid = (account: UserAccount): string => {
   return uid;
 };
 
-export const buildMemberProfile = (account: UserAccount): SocialMemberProfile => ({
-  uid: requireUid(account),
-  username: account.username,
-  fullName: account.fullName,
-  avatar: account.avatar,
-  role: account.role,
-  grade: account.grade,
-  className: account.className,
-  school: account.school,
-});
+export const buildMemberProfile = (account: UserAccount): SocialMemberProfile =>
+  cleanMemberProfile({
+    uid: requireUid(account),
+    username: account.username,
+    fullName: account.fullName,
+    avatar: account.avatar,
+    role: account.role,
+    grade: account.grade,
+    className: account.className,
+    school: account.school,
+  });
 
-export const profileFromDirectory = (entry: UserDirectoryEntry): SocialMemberProfile => ({
-  uid: entry.uid,
-  username: entry.username,
-  fullName: entry.fullName,
-  avatar: entry.avatar,
-  role: entry.role,
-  grade: entry.grade,
-  className: entry.className,
-  school: entry.school,
-});
+export const profileFromDirectory = (entry: UserDirectoryEntry): SocialMemberProfile =>
+  cleanMemberProfile({
+    uid: entry.uid,
+    username: entry.username,
+    fullName: entry.fullName,
+    avatar: entry.avatar,
+    role: entry.role,
+    grade: entry.grade,
+    className: entry.className,
+    school: entry.school,
+  });
+
+/**
+ * Loại bỏ mọi giá trị undefined khỏi hồ sơ thành viên trước khi ghi lên Firestore
+ * (Firestore không chấp nhận field value là undefined). Các trường tuỳ chọn
+ * (username/avatar/grade/className/school) chỉ được thêm khi có giá trị.
+ */
+export const cleanMemberProfile = (profile: SocialMemberProfile): SocialMemberProfile => {
+  const cleaned: SocialMemberProfile = {
+    uid: profile.uid,
+    fullName: profile.fullName?.trim() || 'Người dùng',
+    role: profile.role || 'student',
+    username: profile.username || '',
+  };
+  if (profile.avatar) cleaned.avatar = profile.avatar;
+  if (typeof profile.grade === 'number') cleaned.grade = profile.grade;
+  if (profile.className) cleaned.className = profile.className;
+  if (profile.school) cleaned.school = profile.school;
+  return cleaned;
+};
 
 /** Lấy hồ sơ của người còn lại trong một hội thoại/kết bạn. */
 export const otherMemberProfile = (
@@ -149,7 +170,7 @@ export const sendFriendRequest = async (
     toUid: target.uid,
     members: [myUid, target.uid],
     fromProfile: buildMemberProfile(me),
-    toProfile: target,
+    toProfile: cleanMemberProfile(target),
     status: 'pending',
     createdAt: now,
     updatedAt: now,
@@ -168,8 +189,8 @@ export const acceptFriendRequest = async (request: FriendRequest): Promise<void>
   batch.set(doc(db, 'friendships', pairId(request.fromUid, request.toUid)), {
     members: [request.fromUid, request.toUid],
     profiles: {
-      [request.fromUid]: request.fromProfile,
-      [request.toUid]: request.toProfile,
+      [request.fromUid]: cleanMemberProfile(request.fromProfile),
+      [request.toUid]: cleanMemberProfile(request.toProfile),
     },
     createdAt: Date.now(),
   });
@@ -262,7 +283,7 @@ export const ensureConversation = async (
       members: [myUid, friend.uid],
       profiles: {
         [myUid]: buildMemberProfile(me),
-        [friend.uid]: friend,
+        [friend.uid]: cleanMemberProfile(friend),
       },
       lastMessage: '',
       lastMessageAt: now,

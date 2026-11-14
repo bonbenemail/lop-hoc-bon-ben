@@ -374,7 +374,11 @@ export const Header: React.FC<HeaderProps> = ({
                         )}
                       </div>
                       <p className="text-[11px] text-slate-500 truncate">
-                        {isAdminUser ? 'Tài khoản Chuyên Quản Lý Hệ Thống' : currentUser.email}
+                        {isAdminUser
+                          ? 'Tài khoản Chuyên Quản Lý Hệ Thống'
+                          : currentUser.username
+                            ? `Tên đăng nhập: ${currentUser.username}`
+                            : currentUser.email}
                       </p>
                       {!isAdminUser && (
                         <>

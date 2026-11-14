@@ -39,7 +39,7 @@ export const StudentPortfolioModal: React.FC<StudentPortfolioModalProps> = ({
   const studentName = currentUser?.fullName || 'Học sinh Lớp học Bon Ben';
   const studentEmail = isAdmin
     ? 'Tài khoản Quản trị viên'
-    : currentUser?.email || 'Chưa đăng nhập';
+    : currentUser?.username || currentUser?.email || 'Chưa đăng nhập';
   const studentSchool = currentUser?.school || 'Chưa cập nhật trường';
   const studentClass = currentUser?.className || `${currentGrade}A1`;
   const studentCode = currentUser?.studentCode || `BONBEN-${studentClass}`;
