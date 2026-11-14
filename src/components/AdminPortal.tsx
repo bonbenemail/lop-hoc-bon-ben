@@ -56,7 +56,7 @@ import { AdminSupportInbox } from './AdminSupportInbox';
 import {
   createManagedFirebaseProfile,
   firebaseProfileToUserAccount,
-  disableFirebaseUser,
+  deleteFirebaseUser,
   saveManagedFirebaseProfile,
   sendFirebaseUserPasswordReset,
   subscribeToFirebaseUsers,
@@ -598,13 +598,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
     try {
-      await disableFirebaseUser(account.firebaseUid);
+      await deleteFirebaseUser(account.firebaseUid, account.email);
       setDeletingEmail(null);
-      notify('Đã vô hiệu hóa hồ sơ tài khoản trên Firebase.');
+      notify(`Đã xóa tài khoản ${account.fullName} (${account.email}) khỏi Firebase.`);
     } catch (error: unknown) {
-      console.error('FIREBASE_ADMIN_ACCOUNT_DISABLE_ERROR:', error);
+      console.error('FIREBASE_ADMIN_ACCOUNT_DELETE_ERROR:', error);
       notify(
-        `⚠️ Không thể vô hiệu hóa tài khoản: ${
+        `⚠️ Không thể xóa tài khoản: ${
           error instanceof Error ? error.message : 'Vui lòng thử lại.'
         }`,
         true
@@ -1353,9 +1353,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           <span>·</span>
                           <span>UID: <strong className="font-mono">{acc.firebaseUid}</strong></span>
                           <span>·</span>
-                          {acc.disabled ? (
-                            <span className="font-bold text-red-700">Đã vô hiệu hóa</span>
-                          ) : acc.role === 'student' ? (
+                          {acc.role === 'student' ? (
                             <span
                               className={`font-bold ${
                                 acc.canPracticeAll ? 'text-emerald-700' : 'text-amber-700'
@@ -1386,7 +1384,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        {acc.role === 'student' && !acc.disabled ? (
+                        {acc.role === 'student' ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -1402,7 +1400,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               ? 'Khóa về 3 bài đầu'
                               : 'Cho phép làm mọi bài'}
                           </button>
-                        ) : acc.role === 'teacher' && !acc.disabled ? (
+                        ) : acc.role === 'teacher' ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -1423,7 +1421,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           </button>
                         ) : null}
 
-                        {acc.role !== 'admin' && !acc.disabled && (
+                        {acc.role !== 'admin' && (
                           <>
                             <button
                               type="button"
@@ -1470,7 +1468,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 className="w-3 h-3" />
-                              <span>Vô hiệu hóa</span>
+                              <span>Xóa tài khoản</span>
                             </button>
                           </>
                         )}
@@ -1695,7 +1693,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     {isDeleting && (
                       <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex items-center justify-between gap-2 text-xs">
                         <span className="font-bold text-red-800">
-                          Vô hiệu hóa tài khoản {acc.fullName} ({acc.email})? Người dùng sẽ không thể dùng tài khoản này trên website.
+                          Xóa tài khoản {acc.fullName} ({acc.email})? Tài khoản sẽ bị xóa khỏi hệ thống và không thể đăng nhập lại.
                         </span>
                         <div className="flex gap-2">
                           <button
@@ -1703,7 +1701,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             onClick={() => handleDeleteAccount(acc.email)}
                             className="px-3 py-1 bg-red-600 text-white font-extrabold rounded-lg cursor-pointer"
                           >
-                            Xác nhận vô hiệu hóa
+                            Xác nhận xóa
                           </button>
                           <button
                             type="button"
@@ -1726,9 +1724,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       {activeTab === 'create-account' && (
         <form
           onSubmit={handleCreateManagedAccount}
-          onInvalidCapture={() =>
-            notify('⚠️ Hoàn tất các trường bắt buộc và chọn khu vực/trường trước khi tạo tài khoản.', true)
-          }
+          noValidate
           className="bg-white rounded-3xl border border-sky-200 p-5 sm:p-6 shadow-xs space-y-4 animate-in fade-in"
         >
           <div>
@@ -1931,7 +1927,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <button
             type="submit"
             disabled={isCreatingManagedAccount}
-            className="px-5 py-3 rounded-xl bg-sky-600 disabled:bg-slate-300 text-white text-xs font-extrabold"
+            className="px-5 py-3 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:bg-slate-300 text-white text-xs font-extrabold cursor-pointer disabled:cursor-not-allowed"
           >
             {isCreatingManagedAccount ? 'Đang tạo tài khoản...' : 'Tạo tài khoản'}
           </button>

@@ -48,7 +48,7 @@ import {
   signInFirebaseUser,
   subscribeToFirebaseUsers,
   upsertAuthenticatedFirebaseUser,
-  disableFirebaseUser,
+  deleteFirebaseUser,
 } from '../services/firebaseNotifications';
 import {
   getSchoolDirectory,
@@ -707,12 +707,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
     try {
-      await disableFirebaseUser(target.firebaseUid);
+      await deleteFirebaseUser(target.firebaseUid, target.email);
       setDeletingEmailConfirm(null);
-      setAdminActionBanner(`Đã vô hiệu hóa hồ sơ Firebase của ${target.fullName}.`);
+      setAdminActionBanner(`Đã xóa tài khoản ${target.fullName}.`);
     } catch (error: unknown) {
-      console.error('FIREBASE_ADMIN_ACCOUNT_DISABLE_ERROR:', error);
-      setErrors({ adminDelete: error instanceof Error ? error.message : 'Không thể vô hiệu hóa tài khoản.' });
+      console.error('FIREBASE_ADMIN_ACCOUNT_DELETE_ERROR:', error);
+      setErrors({ adminDelete: error instanceof Error ? error.message : 'Không thể xóa tài khoản.' });
     }
     setTimeout(() => setAdminActionBanner(null), 4000);
   };
@@ -985,7 +985,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       Quản Trị Hệ Thống Lớp Học Bon Ben
                     </h4>
                     <p className="text-xs text-slate-600 mt-0.5">
-                      Danh sách lấy trực tiếp từ Firebase · Có thể duyệt quyền, cập nhật hồ sơ, gửi liên kết đặt lại mật khẩu và vô hiệu hóa hồ sơ.
+                      Danh sách lấy trực tiếp từ Firebase · Có thể duyệt quyền, cập nhật hồ sơ, gửi liên kết đặt lại mật khẩu và xóa tài khoản.
                     </p>
                   </div>
                 </div>
@@ -1089,7 +1089,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
                   {filteredAdminStudents
                     .filter((st) => {
-                      if (st.disabled) return false;
                       if (adminSubTab === 'pending-students') return st.role === 'student';
                       if (adminSubTab === 'pending-teachers') return st.role === 'teacher';
                       return st.role === 'student' || st.role === 'teacher';
@@ -1334,7 +1333,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         {isDeleting && (
                           <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
                             <p className="text-xs text-red-800 font-bold">
-                              Vô hiệu hóa hồ sơ Firebase của <strong>{st.fullName}</strong> ({st.email})? Tài khoản đăng nhập này sẽ bị chặn trên website.
+                              Xóa tài khoản <strong>{st.fullName}</strong> ({st.email})? Tài khoản sẽ bị xóa khỏi hệ thống và không thể đăng nhập lại.
                             </p>
                             <div className="flex items-center gap-2 shrink-0">
                               <button
@@ -1342,7 +1341,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 onClick={() => handleAdminDeleteStudentAccount(st.email)}
                                 className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-lg cursor-pointer"
                               >
-                                Xác nhận vô hiệu hóa
+                                Xác nhận xóa
                               </button>
                               <button
                                 type="button"

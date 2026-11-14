@@ -12,6 +12,7 @@ import {
 } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -43,6 +44,9 @@ import {
 const getDb = () => getFirestore(getFirebaseApp());
 const getUsersCollection = () => collection(getDb(), 'users');
 const getLegacyProfilesCollection = () => collection(getDb(), 'userProfiles');
+// Bia mộ tài khoản đã bị Admin xóa: giữ lại để chặn tài khoản Firebase Auth
+// đăng nhập lại và tự tạo lại hồ sơ sau khi xóa.
+const getDeletedAccountsCollection = () => collection(getDb(), 'deletedAccounts');
 
 const getFirebaseErrorCode = (error: unknown): string =>
   error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
@@ -358,15 +362,19 @@ export const upsertAuthenticatedFirebaseUser = async (
   }
   const userRef = doc(getUsersCollection(), user.uid);
   let userSnapshot;
+  let deletedSnapshot;
   try {
-    userSnapshot = await getDoc(userRef);
+    [userSnapshot, deletedSnapshot] = await Promise.all([
+      getDoc(userRef),
+      getDoc(doc(getDeletedAccountsCollection(), user.uid)),
+    ]);
   } catch (error) {
     console.error('FIREBASE_AUTHENTICATED_USER_READ_ERROR:', error);
     throw error;
   }
-  if (userSnapshot.exists() && userSnapshot.data().disabled === true) {
+  if (deletedSnapshot.exists()) {
     await signOut(getFirebaseAuth());
-    throw new Error('Tài khoản này đã bị Admin vô hiệu hóa. Hãy liên hệ quản trị viên.');
+    throw new Error('Tài khoản này đã bị Admin xóa. Hãy liên hệ quản trị viên.');
   }
   let account =
     accountOverride ||
@@ -595,15 +603,31 @@ export const updateTeacherStudentClassStatus = async (
   }
 };
 
-export const disableFirebaseUser = async (uid: string): Promise<void> => {
+export const deleteFirebaseUser = async (uid: string, email?: string): Promise<void> => {
+  const db = getDb();
+  try {
+    const inboxSnapshot = await getDocs(collection(db, 'users', uid, 'inbox'));
+    if (!inboxSnapshot.empty) {
+      const inboxBatch = writeBatch(db);
+      inboxSnapshot.docs.forEach((inboxDoc) => inboxBatch.delete(inboxDoc.ref));
+      await inboxBatch.commit();
+    }
+  } catch (error) {
+    console.error('FIREBASE_USER_INBOX_DELETE_ERROR:', error);
+  }
   try {
     await setDoc(
-      doc(getUsersCollection(), uid),
-      { uid, disabled: true, disabledAt: new Date().toISOString() },
+      doc(getDeletedAccountsCollection(), uid),
+      {
+        uid,
+        email: email ? email.trim().toLowerCase() : null,
+        deletedAt: serverTimestamp(),
+      },
       { merge: true }
     );
+    await deleteDoc(doc(getUsersCollection(), uid));
   } catch (error) {
-    console.error('FIREBASE_USER_DISABLE_WRITE_ERROR:', error);
+    console.error('FIREBASE_USER_DELETE_ERROR:', error);
     throw error;
   }
 };
