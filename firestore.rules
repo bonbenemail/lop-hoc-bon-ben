@@ -1,8 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+    // Tài khoản đã đăng nhập. KHÔNG yêu cầu email_verified của Firebase vì
+    // người dùng đã xác thực bằng mã OTP 6 số gửi về email khi đăng ký,
+    // nên email_verified luôn là false và sẽ chặn nhầm mọi thao tác.
+    function authenticated() {
+      return request.auth != null;
     }
 
     // Admin được xác định bằng email tài khoản quản trị, không phụ thuộc trạng thái
@@ -10,12 +13,6 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null &&
         request.auth.token.email == 'bonbenemail@gmail.com';
-    }
-
-    // Tài khoản đã đăng nhập (không yêu cầu email_verified của Firebase vì
-    // người dùng đã xác thực bằng mã OTP 6 số khi đăng ký).
-    function authenticated() {
-      return request.auth != null;
     }
 
     /** Người đang đăng nhập có nằm trong danh sách thành viên hay không. */
@@ -44,10 +41,10 @@ service cloud.firestore {
     }
 
     function canCreateOwnUser(uid) {
-      return request.auth != null &&
+      return authenticated() &&
         request.auth.uid == uid &&
-        request.resource.data.email == request.auth.token.email &&
         request.resource.data.uid == uid &&
+        request.resource.data.email is string &&
         request.resource.data.displayName is string &&
         request.resource.data.role in ['student', 'teacher'] &&
         request.resource.data.fullName is string &&
@@ -73,11 +70,12 @@ service cloud.firestore {
         );
     }
 
+    // Người dùng đã đăng nhập được cập nhật hồ sơ của chính mình, nhưng không được
+    // đổi uid, vai trò (role) và thời điểm tạo tài khoản.
     function canUpdateOwnUser(uid) {
-      return signedIn() &&
+      return authenticated() &&
         request.auth.uid == uid &&
         request.resource.data.uid == uid &&
-        request.resource.data.email == request.auth.token.email &&
         request.resource.data.role == resource.data.role &&
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -88,7 +86,7 @@ service cloud.firestore {
 
     function teacherCanUpdateStudent() {
       let teacher = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return signedIn() &&
+      return authenticated() &&
         teacher.role == 'teacher' &&
         teacher.teacherApprovalStatus == 'approved' &&
         resource.data.role == 'student' &&
@@ -104,7 +102,7 @@ service cloud.firestore {
 
     function teacherCanReadStudent() {
       let teacher = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return signedIn() &&
+      return authenticated() &&
         teacher.role == 'teacher' &&
         teacher.teacherApprovalStatus == 'approved' &&
         resource.data.role == 'student' &&
@@ -113,7 +111,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow get: if isAdmin() || (authenticated() && request.auth.uid == uid);
       allow list: if isAdmin() || teacherCanReadStudent();
       allow create: if isAdmin() ||
         canCreateOwnUser(uid);
@@ -121,9 +119,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /inbox/{notificationId} {
-        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow read: if isAdmin() || (authenticated() && request.auth.uid == uid);
         allow create, delete: if isAdmin();
-        allow update: if signedIn() &&
+        allow update: if authenticated() &&
           request.auth.uid == uid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
           request.resource.data.read == true;
@@ -131,14 +129,14 @@ service cloud.firestore {
     }
 
     match /userProfiles/{uid} {
-      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow get: if isAdmin() || (authenticated() && request.auth.uid == uid);
       allow list: if isAdmin();
       allow create, update, delete: if isAdmin();
 
       match /inbox/{notificationId} {
-        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow read: if isAdmin() || (authenticated() && request.auth.uid == uid);
         allow create, delete: if isAdmin();
-        allow update: if signedIn() &&
+        allow update: if authenticated() &&
           request.auth.uid == uid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
           request.resource.data.read == true;
@@ -161,10 +159,11 @@ service cloud.firestore {
       allow create: if request.resource.data.username is string &&
         request.resource.data.uid is string &&
         request.resource.data.email is string &&
-        ((request.auth != null && request.resource.data.uid == request.auth.uid) || isAdmin());
-      allow update: if isAdmin();
+        ((authenticated() && request.resource.data.uid == request.auth.uid) || isAdmin());
+      allow update: if isAdmin() ||
+        (authenticated() && resource.data.uid == request.auth.uid);
       allow delete: if isAdmin() ||
-        (request.auth != null && resource.data.uid == request.auth.uid);
+        (authenticated() && resource.data.uid == request.auth.uid);
     }
 
     // Bảng ánh xạ email -> { uid, username } để tìm bạn bằng email.
@@ -172,12 +171,12 @@ service cloud.firestore {
     match /emailDirectory/{emailKey} {
       allow get: if true;
       allow list: if isAdmin();
-      allow create: if request.auth != null &&
+      allow create: if authenticated() &&
         request.resource.data.uid == request.auth.uid;
       allow update: if isAdmin() ||
-        (request.auth != null && resource.data.uid == request.auth.uid);
+        (authenticated() && resource.data.uid == request.auth.uid);
       allow delete: if isAdmin() ||
-        (request.auth != null && resource.data.uid == request.auth.uid);
+        (authenticated() && resource.data.uid == request.auth.uid);
     }
 
     // Lời mời kết bạn: document id là khóa ghép cặp của 2 uid.
