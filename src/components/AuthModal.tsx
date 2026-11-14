@@ -42,18 +42,15 @@ import {
 } from '../services/firebaseAdminAuth';
 import {
   firebaseProfileToUserAccount,
-  getFirebaseUserProfile,
   registerFirebaseUser,
-  saveOwnFirebaseProfile,
+  saveManagedFirebaseProfile,
   sendFirebaseUserPasswordReset,
   signInFirebaseUser,
+  subscribeToFirebaseUsers,
+  upsertAuthenticatedFirebaseUser,
+  disableFirebaseUser,
 } from '../services/firebaseNotifications';
 import {
-  getAllRegisteredAccounts,
-  saveAllRegisteredAccounts,
-  isSameClassAndSchool,
-  adminUpdateTeacherApproval,
-  adminUpdateStudentPracticePermission,
   getSchoolDirectory,
   formatSchoolName,
   getConfiguredMascotImage
@@ -149,14 +146,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [registeredStudents, setRegisteredStudents] = useState<UserAccount[]>([]);
   const [adminSubTab, setAdminSubTab] = useState<'pending-students' | 'pending-teachers' | 'all'>('pending-students');
   const [adminSearch, setAdminSearch] = useState('');
-  const [editingPasswordEmail, setEditingPasswordEmail] = useState<string | null>(null);
-  const [newStudentPassword, setNewStudentPassword] = useState('');
   const [editingInfoEmail, setEditingInfoEmail] = useState<string | null>(null);
   const [adminEditGrade, setAdminEditGrade] = useState<GradeLevel>(4);
   const [adminEditClass, setAdminEditClass] = useState('');
   const [adminEditSchool, setAdminEditSchool] = useState('');
   const [deletingEmailConfirm, setDeletingEmailConfirm] = useState<string | null>(null);
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [adminActionBanner, setAdminActionBanner] = useState<string | null>(null);
 
   // 6-digit Email OTP verification state (never rendered on web UI, only sent via Gmail)
@@ -196,18 +190,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       entry.district === editDistrict
   );
 
-  // Helper to get registered & Gmail-OTP-verified accounts from localStorage
-  const getRegisteredGmailAccounts = (): UserAccount[] => {
-    return getAllRegisteredAccounts();
-  };
-
   const refreshRegisteredStudents = () => {
-    setRegisteredStudents(getAllRegisteredAccounts());
+    if (!currentUser?.firebaseUid || !isAdminUser) {
+      setRegisteredStudents([]);
+      return;
+    }
+    return subscribeToFirebaseUsers(
+      (profiles) => setRegisteredStudents(profiles.map(firebaseProfileToUserAccount)),
+      (error) => console.error('FIREBASE_ADMIN_USERS_LIST_ERROR:', error)
+    );
   };
 
   useEffect(() => {
     if (isOpen) {
-      refreshRegisteredStudents();
       const directory = getSchoolDirectory();
       setSchoolDirectory(directory);
       if (currentUser) {
@@ -233,6 +228,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     }
   }, [isOpen, currentUser]);
+
+  useEffect(() => {
+    if (!isOpen || !isAdminUser) return;
+    return refreshRegisteredStudents();
+  }, [isOpen, isAdminUser, currentUser?.firebaseUid]);
 
   useEffect(() => {
     if (resendTimer <= 0) return;
@@ -409,71 +409,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setShowForgotConfirmModal(true);
   };
 
-  const handleForgotVerifyAndResetPassword = (e: React.FormEvent) => {
+  const handleForgotVerifyAndResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (forgotEmail.trim().toLowerCase() === ADMIN_GMAIL) {
-      setErrors({
-        otp: 'Mật khẩu Admin phải được đặt lại bằng liên kết Firebase gửi tới email.',
-      });
-      return;
-    }
-    const enteredCode = otpDigits.join('');
-    if (enteredCode.length < 6) {
-      setErrors({
-        otp: 'Vui lòng nhập đủ 6 chữ số khôi phục mật khẩu đã được gửi vào hộp thư Gmail của bạn.',
-      });
-      return;
-    }
-    if (!generatedOtp || enteredCode !== generatedOtp) {
-      setErrors({
-        otp: 'Mã xác thực 6 số không chính xác. Vui lòng kiểm tra lại hộp thư Gmail của bạn!',
-      });
-      return;
-    }
-    if (!resetNewPassword || !validatePassword(resetNewPassword)) {
-      setErrors({
-        resetPassword: `Mật khẩu mới phải trên 6 ký tự (từ 7 ký tự trở lên). Hiện có: ${resetNewPassword.length} ký tự.`,
-      });
-      return;
-    }
-    if (resetNewPassword !== resetConfirmPassword) {
-      setErrors({
-        resetConfirmPassword: 'Mật khẩu xác nhận không khớp với mật khẩu mới.',
-      });
-      return;
-    }
-
-    const cleanEmail = forgotEmail.trim().toLowerCase();
-    const registeredAccounts = getRegisteredGmailAccounts();
-    let updatedAccount: UserAccount | null = null;
-
-    const updatedList = registeredAccounts.map((acc) => {
-      if (acc.email.toLowerCase() === cleanEmail) {
-        const modified = { ...acc, password: resetNewPassword };
-        updatedAccount = modified;
-        return modified;
+    try {
+      if (forgotEmail.trim().toLowerCase() === ADMIN_GMAIL) {
+        await sendAdminFirebasePasswordReset();
+      } else {
+        await sendFirebaseUserPasswordReset(forgotEmail);
       }
-      return acc;
-    });
-
-    localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
-    refreshRegisteredStudents();
-    setErrors({});
-
-    if (updatedAccount) {
-      const finalAccount: UserAccount = updatedAccount;
-      onSelectGrade(finalAccount.grade);
-      onLogin(finalAccount);
-      setSuccessMessage(
-        `Đổi mật khẩu mới thành công! Đã tự động đăng nhập tài khoản ${finalAccount.fullName} (${cleanEmail}).`
-      );
-      setTimeout(() => {
-        setSuccessMessage(null);
-        setForgotStep('request');
-        setResetNewPassword('');
-        setResetConfirmPassword('');
-        onClose();
-      }, 1300);
+      setErrors({});
+      setForgotStep('request');
+      setSuccessMessage(`Firebase đã gửi liên kết đặt lại mật khẩu tới ${forgotEmail.trim()}.`);
+    } catch (error: unknown) {
+      console.error('FIREBASE_PASSWORD_RESET_ERROR:', error);
+      setErrors({
+        gmail: error instanceof Error ? error.message : 'Không thể gửi liên kết đặt lại mật khẩu.',
+      });
     }
   };
 
@@ -485,18 +436,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         otp: 'Tài khoản Admin chỉ được tạo trong Firebase Authentication, không đăng ký từ biểu mẫu công khai.',
       });
       setRegisterStep('form');
-      return;
-    }
-
-    // Kiểm tra lại lần nữa: 1 Gmail chỉ được tạo duy nhất 1 tài khoản
-    const existingAccounts = getRegisteredGmailAccounts();
-    const alreadyExists = existingAccounts.some(
-      (acc) => acc.email.toLowerCase() === cleanEmail
-    );
-    if (alreadyExists) {
-      setErrors({
-        otp: `Địa chỉ Gmail "${cleanEmail}" đã có tài khoản trên hệ thống! Mỗi Gmail chỉ được tạo duy nhất 1 tài khoản.`,
-      });
       return;
     }
 
@@ -522,22 +461,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       registerAccountType === 'teacher' ? 'teacher' : 'student';
 
     // Kiểm tra xem Học sinh mới đăng ký có trùng Lớp & Trường với Giáo viên nào đã đăng ký không
-    const matchedTeacher =
-      finalRole === 'student'
-        ? existingAccounts.find(
-            (acc) =>
-              acc.role === 'teacher' &&
-              acc.teacherApprovalStatus !== 'rejected' &&
-              isSameClassAndSchool(cleanClass, cleanSchool, acc.className, acc.school, selectedGrade, acc.grade)
-          )
-        : undefined;
-
     const newAccount: UserAccount = {
       id: `user-${Date.now()}`,
       fullName: fullName.trim(),
       email: cleanEmail,
-      password: password,
-      verifiedByGmail: true,
       grade: selectedGrade,
       className: cleanClass,
       school: cleanSchool,
@@ -555,9 +482,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       // Giáo viên mới đăng ký cần được Admin xét duyệt
       teacherApprovalStatus: finalRole === 'teacher' ? 'pending' : undefined,
       // Nếu học sinh trùng Lớp & Trường với giáo viên đã đăng ký -> Đợi giáo viên cho vào lớp
-      teacherClassStatus: matchedTeacher ? 'pending' : 'none',
-      matchedTeacherEmail: matchedTeacher?.email.toLowerCase(),
-      matchedTeacherName: matchedTeacher?.fullName,
+      teacherClassStatus: 'none',
       diamonds: 0,
       level: 1,
       studentCode:
@@ -586,17 +511,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const updatedAccounts = [...existingAccounts, newAccount];
-    saveAllRegisteredAccounts(updatedAccounts);
-    refreshRegisteredStudents();
-
     if (finalRole === 'teacher') {
       setSuccessMessage(
         `Tài khoản Giáo viên đã tạo (${newAccount.fullName} · Dạy Lớp ${cleanClass} - ${cleanSchool}) và đang chờ Admin xét duyệt. Hãy xác minh địa chỉ email bằng liên kết Firebase vừa gửi rồi đăng nhập.`
-      );
-    } else if (matchedTeacher) {
-      setSuccessMessage(
-        `Tài khoản đã tạo và được ghi nhận trùng Lớp ${cleanClass} (${cleanSchool}) với Giáo viên ${matchedTeacher.fullName}. Hãy xác minh email bằng liên kết Firebase vừa gửi rồi đăng nhập.`
       );
     } else {
       setSuccessMessage(
@@ -652,13 +569,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const registeredAccounts = getRegisteredGmailAccounts();
-    const matchedAccount = registeredAccounts.find(
-      (acc) => acc.email.toLowerCase() === cleanEmail
-    );
-
-    // NẾU LÀ TẠO TÀI KHOẢN MỚI:
-    // Kiểm tra nghiêm ngặt: 1 tài khoản Gmail chỉ được tạo duy nhất 1 tài khoản!
     if (authMode === 'register') {
       if (cleanEmail === ADMIN_GMAIL) {
         setErrors({
@@ -666,13 +576,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         });
         return;
       }
-      if (matchedAccount) {
-        setErrors({
-          email: `Mỗi tài khoản Gmail chỉ được tạo duy nhất 1 tài khoản! Địa chỉ Gmail "${cleanEmail}" đã được đăng ký trước đó, không được đăng ký thêm tài khoản nào khác.`,
-        });
-        return;
-      }
-
       setErrors({});
       setShowSendConfirmModal(true);
       return;
@@ -683,9 +586,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsAdminSigningIn(true);
       try {
         const firebaseUser = await signInAdminWithFirebase(cleanEmail, password);
-        const adminAccount = createFirebaseAdminAccount(firebaseUser, currentGrade);
+        const adminAccount = await upsertAuthenticatedFirebaseUser(
+          firebaseUser,
+          createFirebaseAdminAccount(firebaseUser, currentGrade)
+        );
         setErrors({});
-        refreshRegisteredStudents();
         onSelectGrade(currentGrade);
         onLogin(adminAccount);
         setAuthMode('admin');
@@ -701,59 +606,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setIsAdminSigningIn(true);
     try {
-      let firebaseUser;
-      try {
-        firebaseUser = await signInFirebaseUser(cleanEmail, password);
-      } catch (error: unknown) {
-        if (
-          error instanceof Error &&
-          error.message === 'FIREBASE_USER_NOT_FOUND' &&
-          matchedAccount?.verifiedByGmail === true
-        ) {
-          await registerFirebaseUser(cleanEmail, password, matchedAccount);
-          setSuccessMessage(
-            'Tài khoản cũ đã được chuyển sang xác thực Firebase. Hãy xác minh địa chỉ email bằng liên kết vừa gửi rồi đăng nhập lại.'
-          );
-          setTimeout(() => {
-            setSuccessMessage(null);
-            onClose();
-          }, 6500);
-          return;
-        }
-        if (error instanceof Error && error.message === 'FIREBASE_USER_NOT_FOUND') {
-          setErrors({
-            login:
-              'Tài khoản này chưa được tạo trong Firebase. Hãy đăng ký bằng Gmail hoặc liên hệ Admin nếu đây là tài khoản do trường cấp.',
-            email: 'Không tìm thấy tài khoản Firebase.',
-          });
-          return;
-        }
-        throw error;
-      }
-
-      const profile = await getFirebaseUserProfile(firebaseUser.uid);
-      let account: UserAccount;
-      if (profile) {
-        account = firebaseProfileToUserAccount(profile);
-        if (matchedAccount) {
-          account = {
-            ...matchedAccount,
-            ...account,
-            firebaseUid: firebaseUser.uid,
-            password: matchedAccount.password,
-          };
-        }
-      } else if (matchedAccount?.verifiedByGmail === true) {
-        const savedProfile = await saveOwnFirebaseProfile(firebaseUser, matchedAccount);
-        account = {
-          ...firebaseProfileToUserAccount(savedProfile),
-          password: matchedAccount.password,
-        };
-      } else {
-        throw new Error(
-          'Tài khoản Firebase chưa có hồ sơ Bon Ben dùng chung. Nếu đây là tài khoản cũ, hãy đăng nhập một lần trên thiết bị còn lưu hồ sơ cũ để đồng bộ; nếu không, hãy liên hệ Admin.'
-        );
-      }
+      const firebaseUser = await signInFirebaseUser(cleanEmail, password);
+      const account = await upsertAuthenticatedFirebaseUser(firebaseUser);
 
       setErrors({});
       onSelectGrade(account.grade);
@@ -806,7 +660,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       district: selectedSchool?.district || currentUser.district,
     };
     onUpdateUser(updatedUser);
-    refreshRegisteredStudents();
     setProfileSavedNotice(
       `Đã cập nhật thành công: Khối Lớp ${editGrade} · Lớp ${editClassName.trim()} · Trường ${updatedUser.school || ''}`
     );
@@ -815,33 +668,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }, 3500);
   };
 
-  // ADMIN ACTION: Đổi mật khẩu của tài khoản đã đăng ký
-  const handleAdminChangeStudentPassword = (studentEmail: string) => {
-    if (!validatePassword(newStudentPassword)) {
-      setErrors({
-        adminPwd: 'Mật khẩu mới phải trên 6 ký tự (từ 7 ký tự trở lên).',
-      });
-      return;
-    }
-    setErrors({});
-    const list = getRegisteredGmailAccounts();
-    const updatedList = list.map((acc) =>
-      acc.email.toLowerCase() === studentEmail.toLowerCase()
-        ? { ...acc, password: newStudentPassword }
-        : acc
-    );
-    localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
-    setRegisteredStudents(updatedList);
-    setEditingPasswordEmail(null);
-    setNewStudentPassword('');
-    setAdminActionBanner(
-      `✅ Đã đổi mật khẩu thành công cho tài khoản: ${studentEmail}`
-    );
-    setTimeout(() => setAdminActionBanner(null), 4000);
-  };
-
   // ADMIN ACTION: Đổi Lớp & Trường của bất kỳ tài khoản nào đã đăng ký
-  const handleAdminChangeStudentClassSchool = (studentEmail: string) => {
+  const handleAdminChangeStudentClassSchool = async (studentEmail: string) => {
     if (!adminEditClass.trim() || !adminEditSchool.trim()) {
       setErrors({
         adminEditInfo: 'Vui lòng nhập đủ Lớp và Trường học.',
@@ -849,39 +677,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
     setErrors({});
-    const list = getRegisteredGmailAccounts();
-    const updatedList = list.map((acc) =>
-      acc.email.toLowerCase() === studentEmail.toLowerCase()
-        ? {
-            ...acc,
-            grade: adminEditGrade,
-            className: adminEditClass.trim(),
-            school: adminEditSchool.trim(),
-          }
-        : acc
-    );
-    localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
-    setRegisteredStudents(updatedList);
-    setEditingInfoEmail(null);
-    setAdminActionBanner(
-      `✅ Đã cập nhật Lớp (${adminEditClass.trim()}) & Trường (${adminEditSchool.trim()}) cho tài khoản: ${studentEmail}`
-    );
+    const account = registeredStudents.find((item) => item.email.toLowerCase() === studentEmail.toLowerCase());
+    if (!account?.firebaseUid) {
+      setErrors({ adminEditInfo: 'Không tìm thấy Firebase UID của tài khoản.' });
+      return;
+    }
+    try {
+      await saveManagedFirebaseProfile({
+        ...account,
+        grade: adminEditGrade,
+        className: adminEditClass.trim(),
+        school: adminEditSchool.trim(),
+      });
+      setEditingInfoEmail(null);
+      setAdminActionBanner(`✅ Đã cập nhật Lớp/Trường trên Firebase cho ${studentEmail}.`);
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_UPDATE_ERROR:', error);
+      setErrors({
+        adminEditInfo: error instanceof Error ? error.message : 'Không thể cập nhật hồ sơ Firebase.',
+      });
+    }
     setTimeout(() => setAdminActionBanner(null), 4000);
   };
 
-  // ADMIN ACTION: Xóa tài khoản đã đăng ký
-  const handleAdminDeleteStudentAccount = (studentEmail: string) => {
-    const list = getRegisteredGmailAccounts();
-    const target = list.find((a) => a.email.toLowerCase() === studentEmail.toLowerCase());
-    const updatedList = list.filter(
-      (acc) => acc.email.toLowerCase() !== studentEmail.toLowerCase()
-    );
-    localStorage.setItem('bonben_registered_accounts', JSON.stringify(updatedList));
-    setRegisteredStudents(updatedList);
-    setDeletingEmailConfirm(null);
-    setAdminActionBanner(
-      `🗑️ Đã xóa tài khoản "${target?.fullName || studentEmail}" (${studentEmail}) khỏi hệ thống.`
-    );
+  const handleAdminDeleteStudentAccount = async (studentEmail: string) => {
+    const target = registeredStudents.find((item) => item.email.toLowerCase() === studentEmail.toLowerCase());
+    if (!target?.firebaseUid) {
+      setErrors({ adminDelete: 'Không tìm thấy Firebase UID của tài khoản.' });
+      return;
+    }
+    try {
+      await disableFirebaseUser(target.firebaseUid);
+      setDeletingEmailConfirm(null);
+      setAdminActionBanner(`Đã vô hiệu hóa hồ sơ Firebase của ${target.fullName}.`);
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_ACCOUNT_DISABLE_ERROR:', error);
+      setErrors({ adminDelete: error instanceof Error ? error.message : 'Không thể vô hiệu hóa tài khoản.' });
+    }
     setTimeout(() => setAdminActionBanner(null), 4000);
   };
 
@@ -1082,7 +914,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      refreshRegisteredStudents();
                       setAuthMode('admin');
                       setErrors({});
                     }}
@@ -1154,7 +985,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       Quản Trị Hệ Thống Lớp Học Bon Ben
                     </h4>
                     <p className="text-xs text-slate-600 mt-0.5">
-                      Quản lý toàn bộ tài khoản đã đăng ký · Có thể <strong>Đổi mật khẩu</strong>, <strong>Sửa Lớp & Trường</strong> và <strong>Xóa tài khoản</strong>.
+                      Danh sách lấy trực tiếp từ Firebase · Có thể duyệt quyền, cập nhật hồ sơ, gửi liên kết đặt lại mật khẩu và vô hiệu hóa hồ sơ.
                     </p>
                   </div>
                 </div>
@@ -1172,6 +1003,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{adminActionBanner}</span>
+                </div>
+              )}
+              {(errors.adminAction || errors.adminDelete) && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                  {errors.adminAction || errors.adminDelete}
                 </div>
               )}
 
@@ -1246,22 +1082,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       : 'Không tìm thấy tài khoản phù hợp với từ khóa tìm kiếm.'}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    Khi người dùng đăng ký bằng Gmail và xác thực mã 6 số, tài khoản sẽ xuất hiện tại đây để bạn quản lý.
+                    Tài khoản được đồng bộ lên Cloud Firestore khi đăng ký hoặc đăng nhập và hiển thị tại đây theo thời gian thực.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
                   {filteredAdminStudents
                     .filter((st) => {
+                      if (st.disabled) return false;
                       if (adminSubTab === 'pending-students') return st.role === 'student';
                       if (adminSubTab === 'pending-teachers') return st.role === 'teacher';
-                      return true;
+                      return st.role === 'student' || st.role === 'teacher';
                     })
                     .map((st) => {
-                    const isEditingPwd = editingPasswordEmail === st.email;
                     const isEditingInfo = editingInfoEmail === st.email;
                     const isDeleting = deletingEmailConfirm === st.email;
-                    const isPwdVisible = !!visiblePasswords[st.email];
 
                     return (
                       <div
@@ -1327,13 +1162,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 onClick={() => {
                                   const nextStatus =
                                     st.teacherApprovalStatus === 'approved' ? 'pending' : 'approved';
-                                  const updated = adminUpdateTeacherApproval(st.email, nextStatus);
-                                  setRegisteredStudents(updated);
-                                  setAdminActionBanner(
-                                    nextStatus === 'approved'
-                                      ? `✅ Đã duyệt tài khoản Giáo viên: ${st.fullName}`
-                                      : `Đã chuyển Giáo viên ${st.fullName} về trạng thái chờ duyệt.`
-                                  );
+                                  void saveManagedFirebaseProfile({
+                                    ...st,
+                                    teacherApprovalStatus: nextStatus,
+                                  }).then(() => {
+                                    setAdminActionBanner(
+                                      nextStatus === 'approved'
+                                        ? `✅ Đã duyệt tài khoản Giáo viên: ${st.fullName}`
+                                        : `Đã chuyển Giáo viên ${st.fullName} về trạng thái chờ duyệt.`
+                                    );
+                                  }).catch((error: unknown) => {
+                                    console.error('FIREBASE_ADMIN_TEACHER_APPROVAL_ERROR:', error);
+                                    setErrors({ adminAction: error instanceof Error ? error.message : 'Không thể cập nhật quyền giáo viên.' });
+                                  });
                                 }}
                                 className={`px-3 py-1.5 rounded-xl font-extrabold text-xs cursor-pointer ${
                                   st.teacherApprovalStatus === 'approved'
@@ -1350,16 +1191,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 type="button"
                                 onClick={() => {
                                   const allow = !st.canPracticeAll;
-                                  const updated = adminUpdateStudentPracticePermission(
-                                    st.email,
-                                    allow
-                                  );
-                                  setRegisteredStudents(updated);
-                                  setAdminActionBanner(
-                                    allow
-                                      ? `✅ Đã cho phép học sinh ${st.fullName} làm mọi bài luyện & bài thi!`
-                                      : `🔒 Đã khóa quyền làm bài của ${st.fullName} (Chỉ mở 3 bài đầu làm thử).`
-                                  );
+                                  void saveManagedFirebaseProfile({
+                                    ...st,
+                                    canPracticeAll: allow,
+                                    practiceApprovalStatus: allow ? 'approved' : 'blocked',
+                                  }).then(() => {
+                                    setAdminActionBanner(
+                                      allow
+                                        ? `✅ Đã cho phép học sinh ${st.fullName} làm mọi bài luyện & bài thi!`
+                                        : `🔒 Đã khóa quyền làm bài của ${st.fullName} (Chỉ mở 3 bài đầu làm thử).`
+                                    );
+                                  }).catch((error: unknown) => {
+                                    console.error('FIREBASE_ADMIN_STUDENT_PERMISSION_ERROR:', error);
+                                    setErrors({ adminAction: error instanceof Error ? error.message : 'Không thể cập nhật quyền học sinh.' });
+                                  });
                                 }}
                                 className={`px-3 py-1.5 rounded-xl font-extrabold text-xs cursor-pointer ${
                                   st.canPracticeAll
@@ -1379,7 +1224,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 setAdminEditGrade(st.grade);
                                 setAdminEditClass(st.className || `${st.grade}A1`);
                                 setAdminEditSchool(st.school || '');
-                                setEditingPasswordEmail(null);
                                 setDeletingEmailConfirm(null);
                                 setErrors({});
                               }}
@@ -1391,22 +1235,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                setEditingPasswordEmail(isEditingPwd ? null : st.email);
-                                setNewStudentPassword(st.password || '');
-                                setEditingInfoEmail(null);
-                                setDeletingEmailConfirm(null);
-                                setErrors({});
+                                void sendFirebaseUserPasswordReset(st.email).then(() => {
+                                  setAdminActionBanner(`Đã gửi liên kết đặt lại mật khẩu tới ${st.email}.`);
+                                }).catch((error: unknown) => {
+                                  console.error('FIREBASE_ADMIN_PASSWORD_RESET_ERROR:', error);
+                                  setErrors({ adminAction: error instanceof Error ? error.message : 'Không thể gửi liên kết đặt lại mật khẩu.' });
+                                });
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
                             >
                               <KeyRound className="w-3.5 h-3.5 text-sky-600" />
-                              <span>Đổi mật khẩu</span>
+                              <span>Gửi link đổi mật khẩu</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => {
                                 setDeletingEmailConfirm(isDeleting ? null : st.email);
-                                setEditingPasswordEmail(null);
                                 setEditingInfoEmail(null);
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
@@ -1417,31 +1261,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Current Password Display Row */}
+                        {/* Firebase account metadata */}
                         <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl text-xs border border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500 font-medium">Mật khẩu hiện tại:</span>
-                            <code className="font-mono font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200">
-                              {isPwdVisible ? st.password || '(trống)' : '••••••••'}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setVisiblePasswords((prev) => ({
-                                  ...prev,
-                                  [st.email]: !prev[st.email],
-                                }))
-                              }
-                              className="text-slate-400 hover:text-sky-600 p-0.5 cursor-pointer"
-                              title={isPwdVisible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                            >
-                              {isPwdVisible ? (
-                                <EyeOff className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
+                          <span className="font-mono text-slate-500">UID: {st.firebaseUid}</span>
                           <span className="text-[10px] text-slate-400">
                             Đăng ký: {new Date(st.createdAt).toLocaleDateString('vi-VN')}
                           </span>
@@ -1508,48 +1330,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </div>
                         )}
 
-                        {/* Change Password Inline Form */}
-                        {isEditingPwd && (
-                          <div className="p-3 rounded-xl bg-sky-50/80 border border-sky-200 space-y-2 animate-in fade-in">
-                            <label className="text-[11px] font-extrabold text-sky-950 block">
-                              Nhập mật khẩu mới cho {st.fullName} ({st.email}) - Trên 6 ký tự:
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={newStudentPassword}
-                                onChange={(e) => setNewStudentPassword(e.target.value)}
-                                placeholder="Nhập mật khẩu mới (> 6 ký tự)..."
-                                className="flex-1 px-3 py-2 rounded-xl border border-sky-300 bg-white text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAdminChangeStudentPassword(st.email)}
-                                className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs rounded-xl shadow-2xs cursor-pointer shrink-0"
-                              >
-                                Lưu mật khẩu
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingPasswordEmail(null)}
-                                className="px-2.5 py-2 bg-white hover:bg-slate-100 text-slate-600 font-bold text-xs rounded-xl border border-slate-200 cursor-pointer shrink-0"
-                              >
-                                Hủy
-                              </button>
-                            </div>
-                            {errors.adminPwd && (
-                              <p className="text-[11px] text-red-600 font-bold">
-                                {errors.adminPwd}
-                              </p>
-                            )}
-                          </div>
-                        )}
-
                         {/* Delete Confirmation Inline Box */}
                         {isDeleting && (
                           <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-in fade-in">
                             <p className="text-xs text-red-800 font-bold">
-                              Xác nhận xóa vĩnh viễn tài khoản <strong>{st.fullName}</strong> ({st.email})?
+                              Vô hiệu hóa hồ sơ Firebase của <strong>{st.fullName}</strong> ({st.email})? Tài khoản đăng nhập này sẽ bị chặn trên website.
                             </p>
                             <div className="flex items-center gap-2 shrink-0">
                               <button
@@ -1557,7 +1342,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                 onClick={() => handleAdminDeleteStudentAccount(st.email)}
                                 className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-lg cursor-pointer"
                               >
-                                Xác nhận xóa
+                                Xác nhận vô hiệu hóa
                               </button>
                               <button
                                 type="button"
@@ -1802,7 +1587,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      refreshRegisteredStudents();
                       setAuthMode('admin');
                     }}
                     className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-2xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"

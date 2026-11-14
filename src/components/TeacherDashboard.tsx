@@ -18,14 +18,17 @@ import {
 } from 'lucide-react';
 import { GradeLevel, Lesson, QuizQuestion, UserAccount } from '../types';
 import {
-  getAllRegisteredAccounts,
   isSameClassAndSchool,
-  teacherUpdateStudentClassStatus,
   getTeacherCustomAssignments,
   saveTeacherCustomAssignment,
   deleteTeacherCustomAssignment,
   applyLessonOverrides
 } from '../services/schoolManager';
+import {
+  firebaseProfileToUserAccount,
+  subscribeToFirebaseStudentsForTeacher,
+  updateTeacherStudentClassStatus,
+} from '../services/firebaseNotifications';
 import {
   getVietnamese20LessonsByGrade,
   getMath20LessonsByGrade,
@@ -72,7 +75,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
 
   const reloadData = () => {
-    setAllAccounts(getAllRegisteredAccounts());
     const allCustom = getTeacherCustomAssignments();
     setTeacherAssignments(
       allCustom.filter(
@@ -92,6 +94,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   useEffect(() => {
     reloadData();
+    return subscribeToFirebaseStudentsForTeacher(
+      currentUser,
+      (profiles) => setAllAccounts(profiles.map(firebaseProfileToUserAccount)),
+      (error) => {
+        console.error('FIREBASE_TEACHER_USERS_LIST_ERROR:', error);
+        showNotice(`Không thể tải danh sách học sinh từ Firebase: ${error.message}`);
+      }
+    );
   }, [currentUser.email, currentUser.className, currentUser.school, progressVersion]);
 
   const showNotice = (msg: string) => {
@@ -121,18 +131,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const approvedStudents = matchingStudents.filter((s) => s.teacherClassStatus === 'approved');
   const rejectedStudents = matchingStudents.filter((s) => s.teacherClassStatus === 'rejected');
 
-  const handleStudentClassDecision = (
+  const handleStudentClassDecision = async (
     student: UserAccount,
     status: 'approved' | 'rejected'
   ) => {
-    const updated = teacherUpdateStudentClassStatus(currentUser, student.email, status);
-    setAllAccounts(updated);
-    if (onUpdateAccounts) onUpdateAccounts();
-    showNotice(
-      status === 'approved'
-        ? `✅ Đã cho phép học sinh "${student.fullName}" vào lớp ${currentUser.className} (${currentUser.school})!`
-        : `Đã từ chối yêu cầu vào lớp của "${student.fullName}".`
-    );
+    try {
+      await updateTeacherStudentClassStatus(currentUser, student, status);
+      if (onUpdateAccounts) onUpdateAccounts();
+      showNotice(
+        status === 'approved'
+          ? `✅ Đã cho phép học sinh "${student.fullName}" vào lớp ${currentUser.className} (${currentUser.school})!`
+          : `Đã từ chối yêu cầu vào lớp của "${student.fullName}".`
+      );
+    } catch (error: unknown) {
+      console.error('FIREBASE_TEACHER_STUDENT_STATUS_ERROR:', error);
+      showNotice(
+        `Không thể cập nhật trạng thái học sinh: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`
+      );
+    }
   };
 
   const handleAddQuestionRow = () => {

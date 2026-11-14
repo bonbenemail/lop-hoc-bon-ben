@@ -2,8 +2,6 @@ import { GradeLevel, Lesson, SchoolDirectoryEntry, SiteConfig, UserAccount } fro
 import { shuffleQuestionOptions } from '../utils/answerOptionShuffle';
 import { VIETNAM_OSM_SCHOOLS } from '../data/vietnamOsmSchools';
 
-const ACCOUNTS_KEY = 'bonben_registered_accounts';
-const CURRENT_USER_KEY = 'bonben_user_account';
 const TEACHER_ASSIGNMENTS_KEY = 'bonben_teacher_assignments';
 const SITE_CONFIG_KEY = 'bonben_site_config';
 const LESSON_OVERRIDES_KEY = 'bonben_lesson_overrides';
@@ -98,120 +96,6 @@ export const isSameClassAndSchool = (
 };
 
 /**
- * Đọc và đồng bộ tự động mối liên kết Lớp & Trường giữa Học sinh và Giáo viên
- */
-export const getAllRegisteredAccounts = (): UserAccount[] => {
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_KEY);
-    if (!raw) return [];
-    const parsed: UserAccount[] = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    const uniqueMap = new Map<string, UserAccount>();
-    for (const acc of parsed) {
-      if (
-        acc &&
-        acc.verifiedByGmail === true &&
-        typeof acc.email === 'string' &&
-        acc.email.toLowerCase().endsWith('@gmail.com') &&
-        acc.email.toLowerCase() !== ADMIN_GMAIL_INTERNAL
-      ) {
-        const key = acc.email.toLowerCase();
-        if (!uniqueMap.has(key)) {
-          // Chuẩn hóa các trường mặc định cho tài khoản cũ nếu chưa có
-          const normalizedAcc: UserAccount = {
-            ...acc,
-            role:
-              acc.role === 'teacher' || acc.role === 'school' || acc.role === 'parent'
-                ? acc.role
-                : 'student',
-            canPracticeAll: acc.role === 'teacher' ? true : acc.canPracticeAll === true,
-            practiceApprovalStatus:
-              acc.role === 'teacher'
-                ? 'approved'
-                : acc.practiceApprovalStatus || (acc.canPracticeAll === true ? 'approved' : 'pending'),
-            teacherApprovalStatus:
-              acc.role === 'teacher' ? acc.teacherApprovalStatus || 'pending' : undefined,
-          };
-          uniqueMap.set(key, normalizedAcc);
-        }
-      }
-    }
-
-    const list = Array.from(uniqueMap.values());
-    const teachers = list.filter((u) => u.role === 'teacher' && u.teacherApprovalStatus !== 'rejected');
-
-    // Tự động kiểm tra xem học sinh có trùng Lớp & Trường với giáo viên nào đã đăng ký không
-    let changed = false;
-    const syncedList: UserAccount[] = list.map((acc): UserAccount => {
-      if (acc.role !== 'student') return acc;
-      const matchedTeacher = teachers.find((t) =>
-        isSameClassAndSchool(acc.className, acc.school, t.className, t.school, acc.grade, t.grade)
-      );
-
-      if (matchedTeacher) {
-        const teacherEmail = matchedTeacher.email.toLowerCase();
-        if (acc.matchedTeacherEmail?.toLowerCase() !== teacherEmail) {
-          changed = true;
-          return {
-            ...acc,
-            matchedTeacherEmail: teacherEmail,
-            matchedTeacherName: matchedTeacher.fullName,
-            teacherClassStatus: acc.teacherClassStatus === 'approved' ? 'approved' : 'pending',
-          };
-        }
-        if (!acc.teacherClassStatus || acc.teacherClassStatus === 'none') {
-          changed = true;
-          return {
-            ...acc,
-            matchedTeacherEmail: teacherEmail,
-            matchedTeacherName: matchedTeacher.fullName,
-            teacherClassStatus: 'pending',
-          };
-        }
-      } else if (acc.teacherClassStatus && acc.teacherClassStatus !== 'none') {
-        changed = true;
-        return {
-          ...acc,
-          matchedTeacherEmail: undefined,
-          matchedTeacherName: undefined,
-          teacherClassStatus: 'none',
-        };
-      }
-      return acc;
-    });
-
-    if (changed) {
-      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(syncedList));
-    }
-
-    return syncedList;
-  } catch (e) {
-    console.error(e);
-    return [];
-  }
-};
-
-export const saveAllRegisteredAccounts = (accounts: UserAccount[]): void => {
-  try {
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-    // Đồng bộ lại tài khoản đang đăng nhập nếu trùng email
-    const currentRaw = localStorage.getItem(CURRENT_USER_KEY);
-    if (currentRaw) {
-      const current: UserAccount = JSON.parse(currentRaw);
-      const matched = accounts.find(
-        (a) => a.email.toLowerCase() === current.email?.toLowerCase()
-      );
-      if (matched) {
-        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(matched));
-      }
-    }
-  } catch (e) {
-    console.error(e);
-  }
-};
-
-/**
  * Kiểm tra bài luyện có thuộc 3 bài đầu tiên (dòng đầu) được phép làm thử hay không
  */
 export const isLessonInFirst3Trial = (lessonIdOrIndex: string | number): boolean => {
@@ -272,73 +156,6 @@ export const canUserAccessExam = (user: UserAccount | null): boolean => {
     return true;
   }
   return false;
-};
-
-/**
- * Admin duyệt hoặc thu hồi tài khoản Giáo viên
- */
-export const adminUpdateTeacherApproval = (
-  teacherEmail: string,
-  status: 'approved' | 'pending' | 'rejected'
-): UserAccount[] => {
-  const accounts = getAllRegisteredAccounts();
-  const next = accounts.map((acc) => {
-    if (acc.email.toLowerCase() === teacherEmail.toLowerCase() && acc.role === 'teacher') {
-      return {
-        ...acc,
-        teacherApprovalStatus: status,
-      };
-    }
-    return acc;
-  });
-  saveAllRegisteredAccounts(next);
-  return getAllRegisteredAccounts();
-};
-
-/**
- * Admin cho phép hoặc không cho phép Học sinh làm toàn bộ bài luyện, bài thi & kiểm tra
- */
-export const adminUpdateStudentPracticePermission = (
-  studentEmail: string,
-  allowAll: boolean
-): UserAccount[] => {
-  const accounts = getAllRegisteredAccounts();
-  const next = accounts.map((acc) => {
-    if (acc.email.toLowerCase() === studentEmail.toLowerCase() && acc.role === 'student') {
-      return {
-        ...acc,
-        canPracticeAll: allowAll,
-        practiceApprovalStatus: (allowAll ? 'approved' : 'blocked') as 'approved' | 'blocked',
-      };
-    }
-    return acc;
-  });
-  saveAllRegisteredAccounts(next);
-  return getAllRegisteredAccounts();
-};
-
-/**
- * Giáo viên duyệt hoặc từ chối Học sinh (cùng Lớp & Trường) vào lớp học của mình
- */
-export const teacherUpdateStudentClassStatus = (
-  teacher: UserAccount,
-  studentEmail: string,
-  status: 'approved' | 'rejected' | 'pending'
-): UserAccount[] => {
-  const accounts = getAllRegisteredAccounts();
-  const next = accounts.map((acc) => {
-    if (acc.email.toLowerCase() === studentEmail.toLowerCase() && acc.role === 'student') {
-      return {
-        ...acc,
-        teacherClassStatus: status,
-        matchedTeacherEmail: teacher.email.toLowerCase(),
-        matchedTeacherName: teacher.fullName,
-      };
-    }
-    return acc;
-  });
-  saveAllRegisteredAccounts(next);
-  return getAllRegisteredAccounts();
 };
 
 /**

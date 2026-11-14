@@ -104,8 +104,6 @@ export interface UserAccount {
   fullName: string;
   email: string;
   phone?: string;
-  password?: string;
-  verifiedByGmail?: boolean;
   grade: GradeLevel;
   className?: string;
   school?: string;
@@ -113,6 +111,7 @@ export interface UserAccount {
   provinceOrCity?: string;
   district?: string;
   role: 'student' | 'teacher' | 'parent' | 'school' | 'admin';
+  disabled?: boolean;
   /**
    * Đối với Học sinh:
    * - canPracticeAll = false (mặc định khi mới đăng ký): Chỉ được làm thử 3 bài ở dòng đầu, không được làm các bài ôn 4..20 và không được làm bài thi/kiểm tra.
@@ -163,8 +162,12 @@ export interface FirebaseUserProfile {
   uid: string;
   email: string;
   fullName: string;
-  role: NotificationAudienceRole;
+  displayName: string;
+  role: UserAccount['role'];
+  disabled?: boolean;
   grade: GradeLevel;
+  phone?: string;
+  avatar?: string;
   className?: string;
   school?: string;
   schoolLevel?: 'elementary' | 'lower-secondary' | 'upper-secondary';
@@ -174,7 +177,13 @@ export interface FirebaseUserProfile {
   canPracticeAll?: boolean;
   practiceApprovalStatus?: 'pending' | 'approved' | 'blocked';
   teacherApprovalStatus?: 'pending' | 'approved' | 'rejected';
-  createdAt?: string;
+  teacherClassStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  matchedTeacherEmail?: string;
+  matchedTeacherName?: string;
+  diamonds?: number;
+  level?: number;
+  selectedExerciseTypes?: string[];
+  createdAt: string;
 }
 
 export interface SchoolDirectoryEntry {

@@ -119,7 +119,6 @@ export const createFirebaseAdminAccount = (user: User, grade: GradeLevel): UserA
   firebaseUid: user.uid,
   fullName: user.displayName || 'Quản Trị Hệ Thống Bon Ben',
   email: FIREBASE_ADMIN_EMAIL,
-  verifiedByGmail: user.emailVerified,
   grade,
   className: `${grade}A1`,
   school: 'Hệ thống Lớp học Bon Ben',

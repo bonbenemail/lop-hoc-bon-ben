@@ -12,6 +12,13 @@ const roleLabels: Record<NotificationAudienceRole, string> = {
   school: 'Nhà trường',
 };
 
+const getRoleLabel = (role: FirebaseUserProfile['role']): string =>
+  role === 'admin'
+    ? 'Quản trị viên'
+    : role === 'parent'
+      ? 'Phụ huynh'
+      : roleLabels[role];
+
 export const AdminNotificationsPanel: React.FC = () => {
   const [profiles, setProfiles] = useState<FirebaseUserProfile[]>([]);
   const [audienceMode, setAudienceMode] = useState<AudienceMode>('all');
@@ -30,10 +37,19 @@ export const AdminNotificationsPanel: React.FC = () => {
     let active = true;
     getFirebaseUserProfiles()
       .then((users) => {
-        if (active) setProfiles(users);
+        if (active) {
+          setProfiles(
+            users.filter(
+              (user) =>
+                (user.role === 'student' || user.role === 'teacher' || user.role === 'school') &&
+                !user.disabled
+            )
+          );
+        }
       })
       .catch((error: unknown) => {
         if (!active) return;
+        console.error('FIREBASE_NOTIFICATION_RECIPIENT_READ_ERROR:', error);
         setErrorMessage(
           error instanceof Error ? error.message : 'Không tải được danh sách tài khoản Firebase.'
         );
@@ -91,6 +107,7 @@ export const AdminNotificationsPanel: React.FC = () => {
       setTitle('');
       setMessage('');
     } catch (error: unknown) {
+      console.error('FIREBASE_NOTIFICATION_SEND_ERROR:', error);
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -257,7 +274,7 @@ export const AdminNotificationsPanel: React.FC = () => {
                         )}
                         <span className="min-w-0">
                           <span className="block truncate font-bold text-slate-800">{profile.fullName}</span>
-                          <span className="block truncate text-slate-500">{profile.email} · {roleLabels[profile.role]}</span>
+                          <span className="block truncate text-slate-500">{profile.email} · {getRoleLabel(profile.role)}</span>
                         </span>
                       </label>
                     ))

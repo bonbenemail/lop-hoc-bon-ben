@@ -10,19 +10,23 @@ service cloud.firestore {
         request.auth.token.email == 'bonbenemail@gmail.com';
     }
 
-    function canCreateOwnProfile(uid) {
+    function canCreateOwnUser(uid) {
       return request.auth != null &&
         request.auth.uid == uid &&
         request.resource.data.email == request.auth.token.email &&
+        request.resource.data.uid == uid &&
+        request.resource.data.displayName is string &&
         request.resource.data.role in ['student', 'teacher'] &&
         request.resource.data.fullName is string &&
         request.resource.data.grade is int &&
         request.resource.data.grade >= 1 &&
         request.resource.data.grade <= 12 &&
         request.resource.data.keys().hasOnly([
-          'email', 'fullName', 'role', 'grade', 'className', 'school',
-          'schoolLevel', 'provinceOrCity', 'district', 'studentCode',
+          'uid', 'email', 'fullName', 'displayName', 'role', 'grade', 'className',
+          'school', 'schoolLevel', 'provinceOrCity', 'district', 'studentCode',
           'canPracticeAll', 'practiceApprovalStatus', 'teacherApprovalStatus',
+          'teacherClassStatus', 'matchedTeacherEmail', 'matchedTeacherName',
+          'phone', 'avatar', 'diamonds', 'level', 'selectedExerciseTypes',
           'createdAt'
         ]) &&
         (
@@ -36,12 +40,67 @@ service cloud.firestore {
         );
     }
 
+    function canUpdateOwnUser(uid) {
+      return signedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.uid == uid &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'email', 'fullName', 'displayName', 'grade', 'className', 'school',
+          'schoolLevel', 'provinceOrCity', 'district', 'phone', 'avatar'
+        ]);
+    }
+
+    function teacherCanUpdateStudent() {
+      let teacher = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return signedIn() &&
+        teacher.role == 'teacher' &&
+        teacher.teacherApprovalStatus == 'approved' &&
+        resource.data.role == 'student' &&
+        teacher.className == resource.data.className &&
+        teacher.school == resource.data.school &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'teacherClassStatus', 'matchedTeacherEmail', 'matchedTeacherName'
+        ]) &&
+        request.resource.data.teacherClassStatus in ['approved', 'rejected'] &&
+        request.resource.data.matchedTeacherEmail == teacher.email &&
+        request.resource.data.matchedTeacherName == teacher.displayName;
+    }
+
+    function teacherCanReadStudent() {
+      let teacher = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return signedIn() &&
+        teacher.role == 'teacher' &&
+        teacher.teacherApprovalStatus == 'approved' &&
+        resource.data.role == 'student' &&
+        teacher.className == resource.data.className &&
+        teacher.school == resource.data.school;
+    }
+
+    match /users/{uid} {
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdmin() || teacherCanReadStudent();
+      allow create: if isAdmin() ||
+        canCreateOwnUser(uid);
+      allow update: if isAdmin() || canUpdateOwnUser(uid) || teacherCanUpdateStudent();
+      allow delete: if isAdmin();
+
+      match /inbox/{notificationId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow create, delete: if isAdmin();
+        allow update: if signedIn() &&
+          request.auth.uid == uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
+          request.resource.data.read == true;
+      }
+    }
+
     match /userProfiles/{uid} {
       allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        canCreateOwnProfile(uid);
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
 
       match /inbox/{notificationId} {
         allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);

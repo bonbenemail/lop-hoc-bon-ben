@@ -16,8 +16,6 @@ import { TeacherDashboard } from './components/TeacherDashboard';
 import { AdminPortal } from './components/AdminPortal';
 import { NotificationInbox } from './components/NotificationInbox';
 import {
-  getAllRegisteredAccounts,
-  saveAllRegisteredAccounts,
   getSiteConfig,
   canUserAccessLesson
 } from './services/schoolManager';
@@ -29,7 +27,9 @@ import {
 } from './services/firebaseAdminAuth';
 import {
   firebaseProfileToUserAccount,
-  getFirebaseUserProfile,
+  saveOwnFirebaseProfile,
+  subscribeToFirebaseUser,
+  upsertAuthenticatedFirebaseUser,
 } from './services/firebaseNotifications';
 import {
   FileText,
@@ -53,36 +53,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<'student' | 'parent' | 'school'>('student');
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => getSiteConfig());
 
-  // User Authentication State with Strict Gmail Registration Verification + Admin & Teacher Support
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    try {
-      localStorage.removeItem('bonben_admin_password');
-      const saved = localStorage.getItem('bonben_user_account');
-      if (saved) {
-        const parsedUser: UserAccount = JSON.parse(saved);
-        if (
-          parsedUser.role === 'admin' ||
-          parsedUser.email?.toLowerCase() === ADMIN_GMAIL_INTERNAL
-        ) {
-          localStorage.removeItem('bonben_user_account');
-        } else {
-          const registeredList = getAllRegisteredAccounts();
-          const matched = registeredList.find(
-            (acc) =>
-              acc.email.toLowerCase() === parsedUser.email?.toLowerCase() &&
-              acc.verifiedByGmail === true
-          );
-          if (parsedUser.verifiedByGmail === true && matched) {
-            return matched;
-          }
-        }
-      }
-      localStorage.removeItem('bonben_user_account');
-    } catch (e) {
-      console.error(e);
-    }
-    return null;
-  });
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const adminAuthSessionRestored = useRef(false);
   const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
 
@@ -103,48 +74,47 @@ export default function App() {
     let unsubscribe: () => void = () => {};
     try {
       unsubscribe = subscribeToFirebaseAdmin((firebaseUser) => {
-        if (
-          firebaseUser?.email?.toLowerCase() === FIREBASE_ADMIN_EMAIL &&
-          firebaseUser.emailVerified
-        ) {
-          adminAuthSessionRestored.current = true;
-          const adminAccount = createFirebaseAdminAccount(firebaseUser, currentGrade);
-          setFirebaseUid(firebaseUser.uid);
-          setCurrentUser(adminAccount);
-          setCurrentGrade(adminAccount.grade);
-          setActivePage('admin-portal');
-          localStorage.setItem('bonben_user_account', JSON.stringify(adminAccount));
-          return;
-        }
-
         if (firebaseUser?.emailVerified) {
+          adminAuthSessionRestored.current =
+            firebaseUser.email?.toLowerCase() === FIREBASE_ADMIN_EMAIL;
           setFirebaseUid(firebaseUser.uid);
-          void getFirebaseUserProfile(firebaseUser.uid)
-            .then((profile) => {
-              if (!profile) return;
-              const profileAccount = firebaseProfileToUserAccount(profile);
-              setCurrentUser((user) =>
-                user?.email.toLowerCase() === profile.email.toLowerCase()
-                  ? { ...user, firebaseUid: firebaseUser.uid }
-                  : profileAccount
+          void upsertAuthenticatedFirebaseUser(
+            firebaseUser,
+            firebaseUser.email?.toLowerCase() === FIREBASE_ADMIN_EMAIL
+              ? createFirebaseAdminAccount(firebaseUser, currentGrade)
+              : undefined
+          )
+            .then((account) => {
+              setCurrentUser(account);
+              setCurrentGrade(account.grade);
+              setActivePage(
+                account.role === 'admin'
+                  ? 'admin-portal'
+                  : account.role === 'teacher'
+                    ? 'teacher-class'
+                    : 'home'
               );
-              setCurrentGrade(profile.grade);
             })
             .catch((error: unknown) => {
               console.error('FIREBASE_USER_PROFILE_RESTORE_ERROR:', error);
+              void signOutFirebaseAdmin();
+              setFirebaseUid(null);
+              setCurrentUser(null);
+              setActivePage('home');
             });
           return;
         }
 
         setFirebaseUid(null);
+        if (firebaseUser) {
+          void signOutFirebaseAdmin();
+        }
         if (adminAuthSessionRestored.current) {
           adminAuthSessionRestored.current = false;
-          localStorage.removeItem('bonben_user_account');
           setCurrentUser((user) => (user?.role === 'admin' ? null : user));
           setActivePage('home');
         } else if (!firebaseUser) {
-          localStorage.removeItem('bonben_user_account');
-          setCurrentUser((user) => (user?.role === 'admin' ? user : null));
+          setCurrentUser(null);
           setActivePage('home');
         }
       });
@@ -154,6 +124,22 @@ export default function App() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUid) return;
+    return subscribeToFirebaseUser(
+      firebaseUid,
+      (profile) => {
+        if (!profile) return;
+        const account = firebaseProfileToUserAccount(profile);
+        setCurrentUser((current) =>
+          current?.firebaseUid === firebaseUid ? { ...current, ...account } : current
+        );
+        setCurrentGrade(account.grade);
+      },
+      (error) => console.error('FIREBASE_USER_PROFILE_LISTENER_ERROR:', error)
+    );
+  }, [firebaseUid]);
 
   // Sync user's grade
   useEffect(() => {
@@ -180,28 +166,13 @@ export default function App() {
     }, 4200);
   };
 
-  const refreshCurrentUserFromStorage = () => {
+  const refreshAppState = () => {
     setSiteConfig(getSiteConfig());
     setProgressVersion((v) => v + 1);
-    if (!currentUser) return;
-    if (
-      currentUser.role === 'admin' ||
-      currentUser.email?.toLowerCase() === ADMIN_GMAIL_INTERNAL
-    ) {
-      return;
-    }
-    const all = getAllRegisteredAccounts();
-    const fresh = all.find(
-      (a) => a.email.toLowerCase() === currentUser.email.toLowerCase()
-    );
-    if (fresh) {
-      setCurrentUser(fresh);
-      localStorage.setItem('bonben_user_account', JSON.stringify(fresh));
-    }
   };
 
   const handleNavigatePage = (page: AppPage) => {
-    refreshCurrentUserFromStorage();
+    refreshAppState();
     setActivePage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -224,17 +195,10 @@ export default function App() {
   };
 
   const handleLogin = (user: UserAccount) => {
-    // Re-sync from normalized storage so teacher matching is fresh
-    let finalUser = user;
-    if (user.role !== 'admin' && user.email.toLowerCase() !== ADMIN_GMAIL_INTERNAL) {
-      const all = getAllRegisteredAccounts();
-      const matched = all.find((a) => a.email.toLowerCase() === user.email.toLowerCase());
-      if (matched) finalUser = matched;
-    }
+    const finalUser = user;
     setCurrentUser(finalUser);
     setFirebaseUid(finalUser.firebaseUid || null);
     setCurrentGrade(finalUser.grade);
-    localStorage.setItem('bonben_user_account', JSON.stringify(finalUser));
 
     if (
       finalUser.role === 'admin' ||
@@ -261,22 +225,19 @@ export default function App() {
     }
   };
 
-  const handleUpdateUser = (updatedUser: UserAccount) => {
+  const handleUpdateUser = async (updatedUser: UserAccount) => {
     try {
-      const list = getAllRegisteredAccounts();
-      const nextList = list.map((acc) =>
-        acc.email.toLowerCase() === updatedUser.email.toLowerCase() ? updatedUser : acc
+      await saveOwnFirebaseProfile(updatedUser);
+      setCurrentUser(updatedUser);
+      setCurrentGrade(updatedUser.grade);
+    } catch (error: unknown) {
+      console.error('FIREBASE_USER_PROFILE_UPDATE_ERROR:', error);
+      showToast(
+        `Không thể lưu hồ sơ lên Firebase: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`
       );
-      saveAllRegisteredAccounts(nextList);
-      const reSynced = getAllRegisteredAccounts().find(
-        (acc) => acc.email.toLowerCase() === updatedUser.email.toLowerCase()
-      );
-      const finalUser = reSynced || updatedUser;
-      setCurrentUser(finalUser);
-      setCurrentGrade(finalUser.grade);
-      localStorage.setItem('bonben_user_account', JSON.stringify(finalUser));
-    } catch (e) {
-      console.error(e);
+      return;
     }
     showToast(
       `✅ Đã cập nhật thông tin Lớp (${updatedUser.className || `Lớp ${updatedUser.grade}`}) & Trường (${updatedUser.school || ''})!`
@@ -294,7 +255,6 @@ export default function App() {
     setCurrentUser(null);
     setFirebaseUid(null);
     setActivePage('home');
-    localStorage.removeItem('bonben_user_account');
     showToast('Đã đăng xuất tài khoản. Bạn có thể đăng nhập hoặc tạo tài khoản mới.');
   };
 
@@ -303,16 +263,14 @@ export default function App() {
     if (currentUser && currentUser.role !== 'admin') {
       const updated = { ...currentUser, grade: g };
       setCurrentUser(updated);
-      localStorage.setItem('bonben_user_account', JSON.stringify(updated));
-      try {
-        const list = getAllRegisteredAccounts();
-        const nextList = list.map((acc) =>
-          acc.email.toLowerCase() === updated.email.toLowerCase() ? { ...acc, grade: g } : acc
+      void saveOwnFirebaseProfile(updated).catch((error: unknown) => {
+        console.error('FIREBASE_USER_GRADE_UPDATE_ERROR:', error);
+        showToast(
+          `Không thể đồng bộ khối lớp lên Firebase: ${
+            error instanceof Error ? error.message : 'Vui lòng thử lại.'
+          }`
         );
-        saveAllRegisteredAccounts(nextList);
-      } catch (e) {
-        console.error(e);
-      }
+      });
     }
   };
 
@@ -617,7 +575,7 @@ export default function App() {
               setProgressVersion((v) => v + 1);
             }}
             onAccountsChange={() => {
-              refreshCurrentUserFromStorage();
+              refreshAppState();
             }}
             onSwitchToLivePageInspect={() => handleNavigatePage('home')}
           />
@@ -628,7 +586,7 @@ export default function App() {
             currentUser={currentUser}
             onOpenLesson={(lessonId) => handleOpenLessonSafe(lessonId)}
             onUpdateAccounts={() => {
-              refreshCurrentUserFromStorage();
+              refreshAppState();
             }}
             progressVersion={progressVersion}
           />
@@ -776,7 +734,7 @@ export default function App() {
         isOpen={isAuthOpen}
         onClose={() => {
           setIsAuthOpen(false);
-          refreshCurrentUserFromStorage();
+          refreshAppState();
         }}
         currentUser={currentUser}
         onLogin={handleLogin}

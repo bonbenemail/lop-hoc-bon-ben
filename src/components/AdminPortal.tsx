@@ -15,8 +15,6 @@ import {
   BookOpen,
   Save,
   RotateCcw,
-  Eye,
-  EyeOff,
   Sparkles,
   Check,
   Clock,
@@ -35,8 +33,6 @@ import {
   UserAccount,
 } from '../types';
 import {
-  getAllRegisteredAccounts,
-  saveAllRegisteredAccounts,
   getSiteConfig,
   saveSiteConfig,
   resetSiteConfig,
@@ -58,8 +54,10 @@ import { AdminNotificationsPanel } from './AdminNotificationsPanel';
 import {
   createManagedFirebaseProfile,
   firebaseProfileToUserAccount,
-  getFirebaseUserProfiles,
+  disableFirebaseUser,
   saveManagedFirebaseProfile,
+  sendFirebaseUserPasswordReset,
+  subscribeToFirebaseUsers,
 } from '../services/firebaseNotifications';
 
 const isValidImageUrl = (value: string): boolean => {
@@ -108,7 +106,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [newAccountManualSchoolLevel, setNewAccountManualSchoolLevel] =
     useState<Exclude<SchoolDirectoryEntry['schoolLevel'], 'all'>>('elementary');
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'student' | 'teacher' | 'school'>('all');
+  const [roleFilter, setRoleFilter] = useState<
+    'all' | 'student' | 'teacher' | 'school' | 'admin'
+  >('all');
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
   const [isBannerError, setIsBannerError] = useState(false);
   const [isCreatingManagedAccount, setIsCreatingManagedAccount] = useState(false);
@@ -131,9 +131,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     Boolean(newAccountDistrict) &&
     (isNewAccountManualSchool || newAccountSchools.length === 0);
 
-  // State sửa mật khẩu & sửa Lớp/Trường trong quản lý tài khoản
-  const [editingPasswordEmail, setEditingPasswordEmail] = useState<string | null>(null);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
+  // State sửa hồ sơ tài khoản
   const [editingInfoEmail, setEditingInfoEmail] = useState<string | null>(null);
   const [editGrade, setEditGrade] = useState<GradeLevel>(4);
   const [editClass, setEditClass] = useState('');
@@ -149,7 +147,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [editLevel, setEditLevel] = useState('1');
   const [editStudentCode, setEditStudentCode] = useState('');
   const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
-  const [showPassMap, setShowPassMap] = useState<Record<string, boolean>>({});
 
   // State sửa trực tiếp trang web
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => getSiteConfig());
@@ -167,58 +164,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setTimeout(() => setBannerMsg(null), 4000);
   };
 
-  const reloadAccounts = async () => {
-    const localAccounts = getAllRegisteredAccounts();
-    setAccounts(localAccounts);
-    try {
-      const profiles = await getFirebaseUserProfiles();
-      const accountsByEmail = new Map(
-        localAccounts.map((account) => [account.email.toLowerCase(), account])
-      );
-      profiles.forEach((profile) => {
-        const cloudAccount = firebaseProfileToUserAccount(profile);
-        const localAccount = accountsByEmail.get(cloudAccount.email.toLowerCase());
-        accountsByEmail.set(cloudAccount.email.toLowerCase(), {
-          ...localAccount,
-          ...cloudAccount,
-          password: localAccount?.password,
-          diamonds: localAccount?.diamonds ?? cloudAccount.diamonds,
-          level: localAccount?.level ?? cloudAccount.level,
-          selectedExerciseTypes:
-            localAccount?.selectedExerciseTypes ?? cloudAccount.selectedExerciseTypes,
-        });
-      });
-      setAccounts(Array.from(accountsByEmail.values()));
-    } catch (error: unknown) {
-      console.error('FIREBASE_ADMIN_ACCOUNT_LIST_ERROR:', error);
-      notify(
-        `⚠️ Không tải được danh sách tài khoản dùng chung từ Firebase. ${
-          error instanceof Error ? error.message : 'Hãy kiểm tra quyền truy cập và kết nối.'
-        }`,
-        true
-      );
-    }
-  };
-
-  const syncManagedProfile = async (account: UserAccount | undefined): Promise<boolean> => {
-    if (!account?.firebaseUid) return true;
-    try {
-      await saveManagedFirebaseProfile(account);
-      return true;
-    } catch (error: unknown) {
-      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
-      notify(
-        `⚠️ Đã lưu thay đổi trên thiết bị này nhưng chưa đồng bộ được Firebase. ${
-          error instanceof Error ? error.message : 'Vui lòng thử lại.'
-        }`,
-        true
-      );
-      return false;
-    }
-  };
-
   useEffect(() => {
-    void reloadAccounts();
+    return subscribeToFirebaseUsers(
+      (users) => setAccounts(users.map(firebaseProfileToUserAccount)),
+      (error) => {
+        console.error('FIREBASE_ADMIN_ACCOUNT_LIST_ERROR:', error);
+        notify(`⚠️ Không tải được danh sách tài khoản Firebase: ${error.message}`, true);
+      }
+    );
   }, []);
 
   // Phân loại Giáo viên & Học sinh rõ ràng
@@ -242,10 +195,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         ? { ...account, teacherApprovalStatus: status }
         : account
     );
-    if (!(await syncManagedProfile(next.find((account) => account.email.toLowerCase() === email.toLowerCase())))) {
+    try {
+      await saveManagedFirebaseProfile(
+        next.find((account) => account.email.toLowerCase() === email.toLowerCase())!
+      );
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify(
+        `⚠️ Không thể đồng bộ trạng thái duyệt lên Firebase: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
       return;
     }
-    saveAllRegisteredAccounts(next);
     setAccounts(next);
     onAccountsChange();
     notify(
@@ -267,7 +230,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify('⚠️ Không thể đồng bộ trạng thái duyệt giáo viên lên Firebase. Hãy thử lại.', true);
       return;
     }
-    saveAllRegisteredAccounts(updated);
     setAccounts(updated);
     onAccountsChange();
     notify('✅ Đã duyệt toàn bộ tài khoản Giáo viên đang chờ!');
@@ -289,10 +251,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           }
         : account
     );
-    if (!(await syncManagedProfile(next.find((account) => account.email.toLowerCase() === email.toLowerCase())))) {
+    try {
+      await saveManagedFirebaseProfile(
+        next.find((account) => account.email.toLowerCase() === email.toLowerCase())!
+      );
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify(
+        `⚠️ Không thể đồng bộ quyền học sinh lên Firebase: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
       return;
     }
-    saveAllRegisteredAccounts(next);
     setAccounts(next);
     onAccountsChange();
     notify(
@@ -316,29 +288,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       notify('⚠️ Không thể đồng bộ trạng thái duyệt học sinh lên Firebase. Hãy thử lại.', true);
       return;
     }
-    saveAllRegisteredAccounts(updated);
     setAccounts(updated);
     onAccountsChange();
     notify('✅ Đã cho phép toàn bộ học sinh làm tất cả bài luyện và bài thi!');
   };
 
-  // Đổi mật khẩu tài khoản
-  const handleSaveNewPassword = (targetEmail: string) => {
-    if (newPasswordInput.length <= 6) {
-      notify('⚠️ Mật khẩu mới phải có nhiều hơn 6 ký tự (từ 7 ký tự trở lên).');
-      return;
+  const handleSendPasswordReset = async (targetEmail: string) => {
+    try {
+      await sendFirebaseUserPasswordReset(targetEmail);
+      notify(`✅ Đã gửi liên kết đặt lại mật khẩu tới ${targetEmail}.`);
+    } catch (error: unknown) {
+      console.error('FIREBASE_PASSWORD_RESET_ERROR:', error);
+      notify(
+        `⚠️ Không thể gửi liên kết đặt lại mật khẩu: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
     }
-    const updated = accounts.map((acc): UserAccount =>
-      acc.email.toLowerCase() === targetEmail.toLowerCase()
-        ? { ...acc, password: newPasswordInput }
-        : acc
-    );
-    saveAllRegisteredAccounts(updated);
-    reloadAccounts();
-    setEditingPasswordEmail(null);
-    setNewPasswordInput('');
-    onAccountsChange();
-    notify('✅ Đã đổi mật khẩu cho tài khoản thành công!');
   };
 
   // Sửa Lớp & Trường
@@ -410,10 +377,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           }
         : acc
     );
-    if (!(await syncManagedProfile(updated.find((account) => account.email.toLowerCase() === targetEmail.toLowerCase())))) {
+    try {
+      await saveManagedFirebaseProfile(
+        updated.find((account) => account.email.toLowerCase() === targetEmail.toLowerCase())!
+      );
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_PROFILE_SYNC_ERROR:', error);
+      notify(
+        `⚠️ Không thể cập nhật hồ sơ trên Firebase: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
       return;
     }
-    saveAllRegisteredAccounts(updated);
     setAccounts(updated);
     setEditingInfoEmail(null);
     onAccountsChange();
@@ -549,8 +526,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       id: `user-${Date.now()}`,
       fullName: newAccountName.trim(),
       email,
-      password: newAccountPassword,
-      verifiedByGmail: true,
       grade: newAccountGrade,
       className: newAccountRole === 'school' ? '' : newAccountClass.trim().toUpperCase(),
       school: schoolName,
@@ -573,10 +548,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     setIsCreatingManagedAccount(true);
     try {
-      const firebaseUid = await createManagedFirebaseProfile(account);
+      const firebaseUid = await createManagedFirebaseProfile(account, newAccountPassword);
       const managedAccount = { ...account, id: firebaseUid, firebaseUid };
       const next = [...accounts, managedAccount];
-      saveAllRegisteredAccounts(next);
       setAccounts(next);
       onAccountsChange();
       setNewAccountName('');
@@ -603,15 +577,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // Xóa tài khoản
-  const handleDeleteAccount = (targetEmail: string) => {
-    const updated = accounts.filter(
-      (acc) => acc.email.toLowerCase() !== targetEmail.toLowerCase()
+  const handleDeleteAccount = async (targetEmail: string) => {
+    const account = accounts.find(
+      (acc) => acc.email.toLowerCase() === targetEmail.toLowerCase()
     );
-    saveAllRegisteredAccounts(updated);
-    reloadAccounts();
-    setDeletingEmail(null);
-    onAccountsChange();
-    notify('🗑️ Đã xóa tài khoản khỏi hệ thống!');
+    if (!account?.firebaseUid) {
+      notify('⚠️ Không tìm thấy Firebase UID của tài khoản.', true);
+      return;
+    }
+    try {
+      await disableFirebaseUser(account.firebaseUid);
+      setDeletingEmail(null);
+      notify('Đã vô hiệu hóa hồ sơ tài khoản trên Firebase.');
+    } catch (error: unknown) {
+      console.error('FIREBASE_ADMIN_ACCOUNT_DISABLE_ERROR:', error);
+      notify(
+        `⚠️ Không thể vô hiệu hóa tài khoản: ${
+          error instanceof Error ? error.message : 'Vui lòng thử lại.'
+        }`,
+        true
+      );
+    }
   };
 
   // Lưu chỉnh sửa trực tiếp giao diện trang web
@@ -716,7 +702,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               Tài khoản Admin chuyên biệt dùng để xét duyệt Giáo viên, cấp/khóa quyền làm bài luyện & bài thi của Học sinh, quản lý toàn bộ tài khoản và chỉnh sửa trực tiếp nội dung trang web.
             </p>
             <p className="text-[11px] text-amber-200 max-w-2xl">
-              Bản hiện tại lưu thay đổi trong localStorage của trình duyệt này; chưa đồng bộ sang thiết bị/người dùng khác hoặc lưu an toàn ở máy chủ.
+              Danh sách tài khoản được đồng bộ trực tiếp từ Firebase; nội dung trang và danh mục trường vẫn được lưu trong trình duyệt này.
             </p>
           </div>
 
@@ -1249,7 +1235,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {(['all', 'student', 'teacher', 'school'] as const).map((r) => (
+              {(['all', 'student', 'teacher', 'school', 'admin'] as const).map((r) => (
                 <button
                   key={r}
                   type="button"
@@ -1266,7 +1252,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       ? `Học sinh (${allStudents.length})`
                       : r === 'teacher'
                         ? `Giáo viên (${allTeachers.length})`
-                        : `Nhà trường (${accounts.filter((account) => account.role === 'school').length})`}
+                        : r === 'school'
+                          ? `Nhà trường (${accounts.filter((account) => account.role === 'school').length})`
+                          : `Admin (${accounts.filter((account) => account.role === 'admin').length})`}
                 </button>
               ))}
             </div>
@@ -1291,7 +1279,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div className="space-y-3">
               {filteredAccounts.map((acc) => {
                 const emailKey = acc.email.toLowerCase();
-                const isEditingPass = editingPasswordEmail === emailKey;
                 const isEditingInfo = editingInfoEmail === emailKey;
                 const isDeleting = deletingEmail === emailKey;
 
@@ -1316,7 +1303,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               ? 'GIÁO VIÊN'
                               : acc.role === 'school'
                                 ? 'NHÀ TRƯỜNG'
-                                : 'HỌC SINH'}
+                                : acc.role === 'admin'
+                                  ? 'ADMIN'
+                                  : acc.role === 'parent'
+                                    ? 'PHỤ HUYNH'
+                                    : 'HỌC SINH'}
                           </span>
                           <span className="font-extrabold text-sm text-slate-900">
                             {acc.fullName}
@@ -1330,30 +1321,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         <div className="text-xs text-slate-500 flex flex-wrap items-center gap-3">
                           <span>Gmail: <strong>{acc.email}</strong></span>
                           <span>·</span>
-                          <span className="inline-flex items-center gap-1">
-                            Mật khẩu:{' '}
-                            <strong className="font-mono text-slate-800">
-                              {showPassMap[emailKey] ? acc.password || '(Chưa đặt)' : '••••••••'}
-                            </strong>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setShowPassMap((prev) => ({
-                                  ...prev,
-                                  [emailKey]: !prev[emailKey],
-                                }))
-                              }
-                              className="text-sky-600 hover:text-sky-800 ml-1 cursor-pointer"
-                            >
-                              {showPassMap[emailKey] ? (
-                                <EyeOff className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </span>
+                          <span>UID: <strong className="font-mono">{acc.firebaseUid}</strong></span>
                           <span>·</span>
-                          {acc.role === 'student' ? (
+                          {acc.disabled ? (
+                            <span className="font-bold text-red-700">Đã vô hiệu hóa</span>
+                          ) : acc.role === 'student' ? (
                             <span
                               className={`font-bold ${
                                 acc.canPracticeAll ? 'text-emerald-700' : 'text-amber-700'
@@ -1375,6 +1347,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 ? '✓ GV Đã duyệt'
                                 : '⏳ GV Chờ duyệt'}
                             </span>
+                          ) : acc.role === 'admin' ? (
+                            <span className="font-bold text-sky-700">Quản trị viên</span>
                           ) : (
                             <span className="font-bold text-amber-700">Tài khoản nhà trường</span>
                           )}
@@ -1382,7 +1356,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        {acc.role === 'student' ? (
+                        {acc.role === 'student' && !acc.disabled ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -1398,7 +1372,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               ? 'Khóa về 3 bài đầu'
                               : 'Cho phép làm mọi bài'}
                           </button>
-                        ) : acc.role === 'teacher' ? (
+                        ) : acc.role === 'teacher' && !acc.disabled ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -1419,60 +1393,57 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           </button>
                         ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingInfoEmail(isEditingInfo ? null : emailKey);
-                            setEditGrade(acc.grade);
-                            setEditClass(acc.className || `${acc.grade}A1`);
-                            setEditSchoolLevel(acc.schoolLevel || 'elementary');
-                            setEditProvince(acc.provinceOrCity || '');
-                            setEditDistrict(acc.district || '');
-                            const matchingSchool = schoolDirectory.find(
-                              (entry) =>
-                                entry.schoolName === acc.school &&
-                                (entry.schoolLevel === (acc.schoolLevel || 'elementary') ||
-                                  entry.schoolLevel === 'all') &&
-                                entry.provinceOrCity === acc.provinceOrCity &&
-                                entry.district === acc.district
-                            );
-                            setEditSchoolId(matchingSchool?.id || '');
-                            setEditRole(acc.role === 'teacher' || acc.role === 'school' ? acc.role : 'student');
-                            setEditFullName(acc.fullName);
-                            setEditPhone(acc.phone || '');
-                            setEditAvatar(acc.avatar || '');
-                            setEditDiamonds(String(acc.diamonds ?? 0));
-                            setEditLevel(String(acc.level ?? 1));
-                            setEditStudentCode(acc.studentCode);
-                            setEditingPasswordEmail(null);
-                          }}
-                          className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          <span>Sửa thông tin</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingPasswordEmail(isEditingPass ? null : emailKey);
-                            setNewPasswordInput('');
-                            setEditingInfoEmail(null);
-                          }}
-                          className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <KeyRound className="w-3 h-3" />
-                          <span>Đổi MK</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setDeletingEmail(isDeleting ? null : emailKey)}
-                          className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span>Xóa</span>
-                        </button>
+                        {acc.role !== 'admin' && !acc.disabled && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingInfoEmail(isEditingInfo ? null : emailKey);
+                                setEditGrade(acc.grade);
+                                setEditClass(acc.className || `${acc.grade}A1`);
+                                setEditSchoolLevel(acc.schoolLevel || 'elementary');
+                                setEditProvince(acc.provinceOrCity || '');
+                                setEditDistrict(acc.district || '');
+                                const matchingSchool = schoolDirectory.find(
+                                  (entry) =>
+                                    entry.schoolName === acc.school &&
+                                    (entry.schoolLevel === (acc.schoolLevel || 'elementary') ||
+                                      entry.schoolLevel === 'all') &&
+                                    entry.provinceOrCity === acc.provinceOrCity &&
+                                    entry.district === acc.district
+                                );
+                                setEditSchoolId(matchingSchool?.id || '');
+                                setEditRole(acc.role === 'teacher' || acc.role === 'school' ? acc.role : 'student');
+                                setEditFullName(acc.fullName);
+                                setEditPhone(acc.phone || '');
+                                setEditAvatar(acc.avatar || '');
+                                setEditDiamonds(String(acc.diamonds ?? 0));
+                                setEditLevel(String(acc.level ?? 1));
+                                setEditStudentCode(acc.studentCode);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Sửa thông tin</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSendPasswordReset(acc.email)}
+                              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <KeyRound className="w-3 h-3" />
+                              <span>Gửi link đổi mật khẩu</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingEmail(isDeleting ? null : emailKey)}
+                              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Vô hiệu hóa</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -1691,29 +1662,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
                     )}
 
-                    {isEditingPass && (
-                      <div className="p-3 rounded-xl bg-white border border-amber-200 flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="password"
-                          value={newPasswordInput}
-                          onChange={(e) => setNewPasswordInput(e.target.value)}
-                          placeholder="Nhập mật khẩu mới (> 6 ký tự)..."
-                          className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveNewPassword(acc.email)}
-                          className="px-4 py-1.5 bg-amber-500 text-slate-950 font-extrabold text-xs rounded-lg cursor-pointer"
-                        >
-                          Lưu mật khẩu mới
-                        </button>
-                      </div>
-                    )}
-
                     {isDeleting && (
                       <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex items-center justify-between gap-2 text-xs">
                         <span className="font-bold text-red-800">
-                          Xác nhận xóa vĩnh viễn tài khoản {acc.fullName} ({acc.email})?
+                          Vô hiệu hóa tài khoản {acc.fullName} ({acc.email})? Người dùng sẽ không thể dùng tài khoản này trên website.
                         </span>
                         <div className="flex gap-2">
                           <button
@@ -1721,7 +1673,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             onClick={() => handleDeleteAccount(acc.email)}
                             className="px-3 py-1 bg-red-600 text-white font-extrabold rounded-lg cursor-pointer"
                           >
-                            Xác nhận xóa
+                            Xác nhận vô hiệu hóa
                           </button>
                           <button
                             type="button"
