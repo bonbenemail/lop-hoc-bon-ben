@@ -175,6 +175,74 @@ export interface SupportTicket {
   handledBy?: string;
 }
 
+/** Hồ sơ công khai lưu trong collection usernames, dùng để tra cứu & kết bạn. */
+export interface UserDirectoryEntry {
+  uid: string;
+  email: string;
+  username: string;
+  fullName: string;
+  role: UserAccount['role'];
+  grade?: number;
+  className?: string;
+  school?: string;
+  avatar?: string;
+}
+
+/** Thông tin rút gọn của một thành viên, lưu kèm để hiển thị mà không cần đọc hồ sơ người khác. */
+export interface SocialMemberProfile {
+  uid: string;
+  username?: string;
+  fullName: string;
+  avatar?: string;
+  role: UserAccount['role'];
+  grade?: number;
+  className?: string;
+  school?: string;
+}
+
+export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
+
+export interface FriendRequest {
+  id: string;
+  fromUid: string;
+  toUid: string;
+  /** [fromUid, toUid] — dùng cho quy tắc truy vấn theo thành viên. */
+  members: string[];
+  fromProfile: SocialMemberProfile;
+  toProfile: SocialMemberProfile;
+  status: FriendRequestStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Friendship {
+  id: string;
+  members: string[];
+  profiles: Record<string, SocialMemberProfile>;
+  createdAt: number;
+}
+
+export interface Conversation {
+  id: string;
+  members: string[];
+  profiles: Record<string, SocialMemberProfile>;
+  lastMessage: string;
+  lastMessageAt: number;
+  lastSenderUid: string;
+  /** Số tin nhắn chưa đọc theo uid. */
+  unread: Record<string, number>;
+  createdAt: number;
+}
+
+export interface DirectMessage {
+  id: string;
+  senderUid: string;
+  senderName: string;
+  text: string;
+  members: string[];
+  createdAt: number;
+}
+
 export interface FirebaseUserProfile {
   uid: string;
   email: string;

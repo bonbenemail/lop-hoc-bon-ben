@@ -10,11 +10,13 @@ import {
   where,
 } from 'firebase/firestore';
 import { getFirebaseApp } from './firebaseAdminAuth';
+import type { UserAccount, UserDirectoryEntry } from '../types';
 
 /**
  * Tên tài khoản (username) là duy nhất và được lưu trong collection `usernames`
  * với document id chính là username đã chuẩn hóa, do đó Firestore tự chống trùng.
- * Mỗi document ánh xạ username -> { uid, email } để phục vụ đăng nhập.
+ * Mỗi document ánh xạ username -> hồ sơ công khai (uid, email, họ tên, khối lớp...),
+ * vừa phục vụ đăng nhập vừa phục vụ tra cứu & kết bạn.
  */
 export const USERNAME_MIN_LENGTH = 8;
 export const USERNAME_MAX_LENGTH = 30;
@@ -52,11 +54,34 @@ export const lookupEmailByUsername = async (raw: string): Promise<string | null>
 export const isUsernameAvailable = async (raw: string): Promise<boolean> =>
   (await lookupEmailByUsername(raw)) === null;
 
+/** Hồ sơ công khai lưu kèm trong document username (phục vụ tìm kiếm & kết bạn). */
+export interface UsernameDirectoryInfo {
+  fullName?: string;
+  role?: UserAccount['role'];
+  grade?: number;
+  className?: string;
+  school?: string;
+  avatar?: string;
+}
+
+const directoryFieldsFrom = (info?: UsernameDirectoryInfo): Record<string, unknown> => {
+  if (!info) return {};
+  const fields: Record<string, unknown> = {};
+  if (info.fullName) fields.fullName = info.fullName;
+  if (info.role) fields.role = info.role;
+  if (typeof info.grade === 'number') fields.grade = info.grade;
+  if (info.className) fields.className = info.className;
+  if (info.school) fields.school = info.school;
+  if (info.avatar) fields.avatar = info.avatar;
+  return fields;
+};
+
 /** Đăng ký tên tài khoản cho một tài khoản; ném lỗi nếu đã bị người khác dùng. */
 export const reserveUsername = async (
   raw: string,
   uid: string,
-  email: string
+  email: string,
+  info?: UsernameDirectoryInfo
 ): Promise<void> => {
   const username = normalizeUsername(raw);
   const ref = doc(getUsernamesCollection(), username);
@@ -68,7 +93,45 @@ export const reserveUsername = async (
     username,
     uid,
     email: email.trim().toLowerCase(),
+    ...directoryFieldsFrom(info),
   });
+};
+
+/** Cập nhật hồ sơ công khai trong document username (nếu tài khoản có username). */
+export const syncUsernameDirectory = async (
+  raw: string,
+  uid: string,
+  info: UsernameDirectoryInfo
+): Promise<void> => {
+  const username = normalizeUsername(raw);
+  if (!username) return;
+  const ref = doc(getUsernamesCollection(), username);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists() || snapshot.data().uid !== uid) return;
+  await setDoc(ref, { username, uid, ...directoryFieldsFrom(info) }, { merge: true });
+};
+
+/** Tra cứu hồ sơ công khai theo tên tài khoản (dùng cho chức năng tìm bạn). */
+export const lookupDirectoryByUsername = async (
+  raw: string
+): Promise<UserDirectoryEntry | null> => {
+  const username = normalizeUsername(raw);
+  if (!username) return null;
+  const snapshot = await getDoc(doc(getUsernamesCollection(), username));
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data();
+  if (typeof data.uid !== 'string' || !data.uid) return null;
+  return {
+    uid: data.uid,
+    email: typeof data.email === 'string' ? data.email : '',
+    username,
+    fullName: typeof data.fullName === 'string' && data.fullName ? data.fullName : username,
+    role: (data.role as UserAccount['role']) || 'student',
+    grade: typeof data.grade === 'number' ? data.grade : undefined,
+    className: typeof data.className === 'string' ? data.className : undefined,
+    school: typeof data.school === 'string' ? data.school : undefined,
+    avatar: typeof data.avatar === 'string' ? data.avatar : undefined,
+  };
 };
 
 /** Giải phóng tên tài khoản (dùng khi đổi tên hoặc hoàn tác đăng ký). */

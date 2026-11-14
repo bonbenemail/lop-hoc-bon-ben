@@ -48,9 +48,22 @@ import {
   releaseUsername,
   releaseUsernamesForUid,
   reserveUsername,
+  syncUsernameDirectory,
+  type UsernameDirectoryInfo,
 } from './usernames';
 
 const getDb = () => getFirestore(getFirebaseApp());
+
+/** Hồ sơ công khai đi kèm document username để phục vụ tìm kiếm & kết bạn. */
+const usernameDirectoryInfoFromAccount = (account: UserAccount): UsernameDirectoryInfo => ({
+  fullName: account.fullName,
+  role: account.role,
+  grade: account.grade,
+  className: account.className,
+  school: account.school,
+  avatar: account.avatar,
+});
+
 const getUsersCollection = () => collection(getDb(), 'users');
 const getLegacyProfilesCollection = () => collection(getDb(), 'userProfiles');
 
@@ -92,7 +105,12 @@ export const registerFirebaseUser = async (
       { merge: true }
     );
     if (username) {
-      await reserveUsername(username, credential.user.uid, credential.user.email || email);
+      await reserveUsername(
+        username,
+        credential.user.uid,
+        credential.user.email || email,
+        usernameDirectoryInfoFromAccount(account)
+      );
       usernameReserved = true;
     }
   } catch (error) {
@@ -349,6 +367,17 @@ export const saveManagedFirebaseProfile = async (
     console.error('FIREBASE_USER_PROFILE_WRITE_ERROR:', error);
     throw error;
   }
+  if (account.username) {
+    try {
+      await syncUsernameDirectory(
+        account.username,
+        account.firebaseUid,
+        usernameDirectoryInfoFromAccount(account)
+      );
+    } catch (error) {
+      console.error('FIREBASE_USERNAME_DIRECTORY_SYNC_ERROR:', error);
+    }
+  }
 };
 
 export const saveOwnFirebaseProfile = async (account: UserAccount): Promise<void> => {
@@ -376,6 +405,17 @@ export const saveOwnFirebaseProfile = async (account: UserAccount): Promise<void
   } catch (error) {
     console.error('FIREBASE_OWN_USER_PROFILE_WRITE_ERROR:', error);
     throw error;
+  }
+  if (account.username) {
+    try {
+      await syncUsernameDirectory(
+        account.username,
+        account.firebaseUid,
+        usernameDirectoryInfoFromAccount(account)
+      );
+    } catch (error) {
+      console.error('FIREBASE_OWN_USERNAME_DIRECTORY_SYNC_ERROR:', error);
+    }
   }
 };
 
@@ -482,6 +522,17 @@ export const upsertAuthenticatedFirebaseUser = async (
   } catch (error) {
     console.error('FIREBASE_AUTHENTICATED_USER_UPSERT_ERROR:', error);
     throw error;
+  }
+  if (resolvedAccount.username) {
+    try {
+      await syncUsernameDirectory(
+        resolvedAccount.username,
+        user.uid,
+        usernameDirectoryInfoFromAccount(resolvedAccount)
+      );
+    } catch (error) {
+      console.error('FIREBASE_AUTHENTICATED_USERNAME_DIRECTORY_SYNC_ERROR:', error);
+    }
   }
   return resolvedAccount;
 };
@@ -791,7 +842,12 @@ export const createManagedFirebaseProfile = async (
       { merge: true }
     );
     if (username) {
-      await reserveUsername(username, credential.user.uid, account.email);
+      await reserveUsername(
+        username,
+        credential.user.uid,
+        account.email,
+        usernameDirectoryInfoFromAccount(account)
+      );
       usernameReserved = true;
     }
     return credential.user.uid;

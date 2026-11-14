@@ -15,6 +15,7 @@ import { SupportModal } from './components/SupportModal';
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { AdminPortal } from './components/AdminPortal';
 import { NotificationInbox } from './components/NotificationInbox';
+import { SocialHub } from './components/SocialHub';
 import {
   getSiteConfig,
   canUserAccessLesson
@@ -731,6 +732,8 @@ export default function App() {
       />
 
       <NotificationInbox uid={firebaseUid} />
+
+      <SocialHub currentUser={currentUser} onNotice={showToast} />
 
       <AuthModal
         isOpen={isAuthOpen}

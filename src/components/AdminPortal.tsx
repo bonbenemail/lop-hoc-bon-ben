@@ -23,7 +23,8 @@ import {
   MapPin,
   Plus,
   Bell,
-  Inbox
+  Inbox,
+  MessageSquare
 } from 'lucide-react';
 import {
   GradeLevel,
@@ -53,6 +54,7 @@ import { GRADE_EXERCISE_TYPES, HERO_IMAGE, MASCOT_IMAGE } from '../data/bonbenDa
 import { VIETNAM_ADMIN_UNITS } from '../data/vietnamAdministrativeUnits';
 import { AdminNotificationsPanel } from './AdminNotificationsPanel';
 import { AdminSupportInbox } from './AdminSupportInbox';
+import { AdminChatHistoryModal } from './AdminChatHistoryModal';
 import {
   createManagedFirebaseProfile,
   firebaseProfileToUserAccount,
@@ -102,6 +104,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   >('pending-students');
 
   const [accounts, setAccounts] = useState<UserAccount[]>([]);
+  const [historyAccount, setHistoryAccount] = useState<UserAccount | null>(null);
   const [schoolDirectory, setSchoolDirectoryState] = useState<SchoolDirectoryEntry[]>(() => getSchoolDirectory());
   const [directorySchoolName, setDirectorySchoolName] = useState('');
   const [directorySchoolLevel, setDirectorySchoolLevel] = useState<SchoolDirectoryEntry['schoolLevel']>('elementary');
@@ -1451,6 +1454,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           <>
                             <button
                               type="button"
+                              onClick={() => setHistoryAccount(acc)}
+                              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>Lịch sử trò chuyện</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => {
                                 setEditingInfoEmail(isEditingInfo ? null : emailKey);
                                 setEditGrade(acc.grade);
@@ -2578,6 +2589,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         </div>
       )}
+
+      <AdminChatHistoryModal account={historyAccount} onClose={() => setHistoryAccount(null)} />
     </section>
   );
 };

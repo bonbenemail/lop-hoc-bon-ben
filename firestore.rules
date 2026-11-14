@@ -12,6 +12,17 @@ service cloud.firestore {
         request.auth.token.email == 'bonbenemail@gmail.com';
     }
 
+    // Tài khoản đã đăng nhập (không yêu cầu email_verified của Firebase vì
+    // người dùng đã xác thực bằng mã OTP 6 số khi đăng ký).
+    function authenticated() {
+      return request.auth != null;
+    }
+
+    /** Người đang đăng nhập có nằm trong danh sách thành viên hay không. */
+    function isParticipant(members) {
+      return authenticated() && members is list && request.auth.uid in members;
+    }
+
     function isValidSupportTicket() {
       return request.resource.data.keys().hasOnly([
           'senderName', 'senderEmail', 'senderUid', 'gradeInfo', 'schoolInfo',
@@ -152,6 +163,40 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin() ||
         (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
+    // Lời mời kết bạn: document id là khóa ghép cặp của 2 uid.
+    match /friendRequests/{requestId} {
+      allow get: if isAdmin() || isParticipant(resource.data.members);
+      allow list: if isAdmin() || authenticated();
+      allow create: if isParticipant(request.resource.data.members);
+      allow update, delete: if isAdmin() || isParticipant(resource.data.members);
+    }
+
+    // Quan hệ bạn bè: chỉ 2 thành viên đọc/ghi, Admin đọc toàn bộ.
+    match /friendships/{friendshipId} {
+      allow get: if isAdmin() || isParticipant(resource.data.members);
+      allow list: if isAdmin() || authenticated();
+      allow create: if isParticipant(request.resource.data.members);
+      allow update, delete: if isAdmin() || isParticipant(resource.data.members);
+    }
+
+    // Hội thoại 1-1 và tin nhắn: thành viên được đọc/ghi, Admin đọc toàn bộ
+    // để kiểm soát lịch sử trò chuyện của người dùng.
+    match /conversations/{conversationId} {
+      allow get: if isAdmin() || isParticipant(resource.data.members);
+      allow list: if isAdmin() || authenticated();
+      allow create: if isParticipant(request.resource.data.members);
+      allow update, delete: if isAdmin() || isParticipant(resource.data.members);
+
+      match /messages/{messageId} {
+        allow get, list: if isAdmin() ||
+          isParticipant(get(/databases/$(database)/documents/conversations/$(conversationId)).data.members);
+        allow create: if authenticated() &&
+          request.resource.data.senderUid == request.auth.uid &&
+          isParticipant(get(/databases/$(database)/documents/conversations/$(conversationId)).data.members);
+        allow update, delete: if isAdmin();
+      }
     }
   }
 }
