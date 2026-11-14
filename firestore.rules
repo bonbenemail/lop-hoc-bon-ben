@@ -181,7 +181,9 @@ service cloud.firestore {
 
     // Lời mời kết bạn: document id là khóa ghép cặp của 2 uid.
     match /friendRequests/{requestId} {
-      allow get: if isAdmin() || isParticipant(resource.data.members);
+      // resource == null: document chưa tồn tại -> phải cho phép đọc để client
+      // nhận được snapshot.exists() == false thay vì bị từ chối quyền.
+      allow get: if isAdmin() || resource == null || isParticipant(resource.data.members);
       allow list: if isAdmin() || authenticated();
       allow create: if isParticipant(request.resource.data.members);
       allow update, delete: if isAdmin() || isParticipant(resource.data.members);
@@ -189,7 +191,9 @@ service cloud.firestore {
 
     // Quan hệ bạn bè: chỉ 2 thành viên đọc/ghi, Admin đọc toàn bộ.
     match /friendships/{friendshipId} {
-      allow get: if isAdmin() || isParticipant(resource.data.members);
+      // resource == null: document chưa tồn tại -> phải cho phép đọc để client
+      // nhận được snapshot.exists() == false thay vì bị từ chối quyền.
+      allow get: if isAdmin() || resource == null || isParticipant(resource.data.members);
       allow list: if isAdmin() || authenticated();
       allow create: if isParticipant(request.resource.data.members);
       allow update, delete: if isAdmin() || isParticipant(resource.data.members);
@@ -198,7 +202,9 @@ service cloud.firestore {
     // Hội thoại 1-1 và tin nhắn: thành viên được đọc/ghi, Admin đọc toàn bộ
     // để kiểm soát lịch sử trò chuyện của người dùng.
     match /conversations/{conversationId} {
-      allow get: if isAdmin() || isParticipant(resource.data.members);
+      // resource == null: document chưa tồn tại -> phải cho phép đọc để client
+      // nhận được snapshot.exists() == false thay vì bị từ chối quyền.
+      allow get: if isAdmin() || resource == null || isParticipant(resource.data.members);
       allow list: if isAdmin() || authenticated();
       allow create: if isParticipant(request.resource.data.members);
       allow update, delete: if isAdmin() || isParticipant(resource.data.members);
@@ -215,7 +221,9 @@ service cloud.firestore {
 
     // Quan hệ chặn giữa 2 người dùng: chỉ 2 thành viên đọc/ghi, Admin đọc toàn bộ.
     match /blocks/{blockId} {
-      allow get: if isAdmin() || isParticipant(resource.data.members);
+      // resource == null: document chưa tồn tại -> phải cho phép đọc để client
+      // nhận được snapshot.exists() == false thay vì bị từ chối quyền.
+      allow get: if isAdmin() || resource == null || isParticipant(resource.data.members);
       allow list: if isAdmin() || authenticated();
       allow create: if isParticipant(request.resource.data.members) &&
         request.resource.data.blockerUid == request.auth.uid;
